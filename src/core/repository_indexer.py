@@ -162,7 +162,7 @@ class RepositoryIndexer:
     
     async def _process_repository_files(
         self,
-        repo_id: str,
+        repo_url: str,
         repo_path: str,
         file_paths: List[str],
         commit_sha: str,
@@ -172,7 +172,7 @@ class RepositoryIndexer:
         Process multiple files in a repository.
         
         Args:
-            repo_id: Repository identifier
+            repo_url: Repository identifier
             repo_path: Path to repository root
             file_paths: List of file paths to process
             commit_sha: Commit SHA
@@ -203,7 +203,7 @@ class RepositoryIndexer:
                 
                 # Process the file using FileIndexer
                 success = await self.file_indexer.process_file(
-                    repo_id=repo_id,
+                    repo_url=repo_url,
                     file_path=file_path,
                     commit_sha=commit_sha,
                     file_timestamp=commit_timestamp,

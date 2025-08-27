@@ -101,7 +101,7 @@ class FileIndexer:
             logger.error(f"Error checking file timestamp for {file_path}: {e}")
             return True  # Process on error to be safe
     
-        async def process_file(
+    async def process_file(
         self,
         repo_url: str,
         file_path: str,
@@ -179,7 +179,7 @@ class FileIndexer:
     
     async def _index_file_with_lock(
         self,
-        repo_id: str,
+        repo_url: str,
         file_path: str,
         commit_sha: str,
         file_timestamp: str,
@@ -193,7 +193,7 @@ class FileIndexer:
         try:
             # Create or update file index
             file_index = FileIndex(
-                repoId=repo_id,
+                repoId=repo_url,
                 filePath=file_path,
                 fileHash=file_hash,
                 lastCommitSHA=commit_sha,
@@ -210,20 +210,20 @@ class FileIndexer:
             doc_ref.set(file_index.model_dump())
             
             # Update repository metadata
-            await self._update_repository_metadata(repo_id, commit_sha, file_timestamp)
+            await self._update_repository_metadata(repo_url, commit_sha, file_timestamp)
             
-            logger.info(f"File index updated: {repo_id}:{file_path}")
+            logger.info(f"File index updated: {repo_url}:{file_path}")
             
         except Exception as e:
             logger.error(f"Error indexing file {file_path}: {e}")
             raise
     
-    async def get_file_index(self, repo_id: str, file_path: str) -> Optional[FileIndex]:
+    async def get_file_index(self, repo_url: str, file_path: str) -> Optional[FileIndex]:
         """
         Get file index from Firestore.
         
         Args:
-            repo_id: Repository identifier
+            repo_url: Repository URL identifier
             file_path: Relative path within repository
             
         Returns:
@@ -231,7 +231,7 @@ class FileIndexer:
         """
         try:
             # Query by repoId and filePath fields instead of document ID
-            query = self.file_indexes.where('repoId', '==', repo_id).where('filePath', '==', file_path)
+            query = self.file_indexes.where('repoId', '==', repo_url).where('filePath', '==', file_path)
             docs = query.limit(1).stream()
             
             for doc in docs:
@@ -239,18 +239,18 @@ class FileIndexer:
             return None
             
         except Exception as e:
-            logger.error(f"Error getting file index for {repo_id}:{file_path}: {e}")
+            logger.error(f"Error getting file index for {repo_url}:{file_path}: {e}")
             return None
     
     async def _update_repository_metadata(
         self, 
-        repo_id: str, 
+        repo_url: str, 
         commit_sha: str, 
         commit_timestamp: str
     ):
         """Update repository metadata after processing a file."""
         try:
-            repo_ref = self.repositories.document(repo_id)
+            repo_ref = self.repositories.document(repo_url)
             
             # Get current repository data
             repo_doc = repo_ref.get()
@@ -269,9 +269,9 @@ class FileIndexer:
             else:
                 # Create new repository
                 repo_ref.set({
-                    'repoId': repo_id,
-                    'name': repo_id,  # Default name, can be updated later
-                    'url': '',  # Can be updated later
+                    'repoId': repo_url,
+                    'name': repo_url,  # Default name, can be updated later
+                    'url': repo_url,  # Set URL to the repo_url
                     'lastProcessedCommit': commit_sha,
                     'lastProcessedCommitTimestamp': commit_timestamp,
                     'totalFiles': 0,  # Will be updated when scanning repository
@@ -280,10 +280,10 @@ class FileIndexer:
                     'status': 'processing'
                 })
             
-            logger.debug(f"Updated repository metadata for {repo_id}")
+            logger.debug(f"Updated repository metadata for {repo_url}")
             
         except Exception as e:
-            logger.error(f"Error updating repository metadata for {repo_id}: {e}")
+            logger.error(f"Error updating repository metadata for {repo_url}: {e}")
     
     async def _get_git_file_hash(self, file_path: str, file_content: str) -> str:
         """
@@ -318,18 +318,18 @@ class FileIndexer:
         logger.info(f"Using content hash for {file_path}: {content_hash[:8]}...")
         return content_hash
     
-    async def get_repository_metadata(self, repo_id: str) -> Optional[RepositoryMetadata]:
+    async def get_repository_metadata(self, repo_url: str) -> Optional[RepositoryMetadata]:
         """
         Get repository metadata from Firestore.
         
         Args:
-            repo_id: Repository identifier
+            repo_url: Repository URL identifier
             
         Returns:
             RepositoryMetadata if found, None otherwise
         """
         try:
-            repo_ref = self.repositories.document(repo_id)
+            repo_ref = self.repositories.document(repo_url)
             doc = repo_ref.get()
             
             if doc.exists:
@@ -337,21 +337,21 @@ class FileIndexer:
             return None
             
         except Exception as e:
-            logger.error(f"Error getting repository metadata for {repo_id}: {e}")
+            logger.error(f"Error getting repository metadata for {repo_url}: {e}")
             return None
     
-    async def list_file_indexes(self, repo_id: str) -> List[FileIndex]:
+    async def list_file_indexes(self, repo_url: str) -> List[FileIndex]:
         """
         List all file indexes for a repository.
         
         Args:
-            repo_id: Repository identifier
+            repo_url: Repository URL identifier
             
         Returns:
             List of FileIndex objects
         """
         try:
-            query = self.file_indexes.where('repoId', '==', repo_id)
+            query = self.file_indexes.where('repoId', '==', repo_url)
             docs = query.stream()
             
             file_indexes = []
@@ -365,7 +365,7 @@ class FileIndexer:
             return file_indexes
             
         except Exception as e:
-            logger.error(f"Error listing file indexes for {repo_id}: {e}")
+            logger.error(f"Error listing file indexes for {repo_url}: {e}")
             return []
     
     def _is_file_in_allowed_folder(self, file_path: str) -> bool:
@@ -387,7 +387,7 @@ class FileIndexer:
     
     async def process_repository_files(
         self,
-        repo_id: str,
+        repo_url: str,
         repo_path: str,
         file_paths: List[str],
         commit_sha: str,
@@ -397,7 +397,7 @@ class FileIndexer:
         Process multiple files in a repository.
         
         Args:
-            repo_id: Repository identifier
+            repo_url: Repository URL identifier
             repo_path: Path to repository root
             file_paths: List of file paths to process
             commit_sha: Commit SHA
@@ -457,7 +457,7 @@ class FileIndexer:
                     
                     # Process the file
                     success = await self.process_file(
-                        repo_id, file_path, commit_sha, commit_timestamp,
+                        repo_url, file_path, commit_sha, commit_timestamp,
                         file_content, language, exports, imports
                     )
                     
@@ -497,12 +497,12 @@ class FileIndexer:
         else:
             return "text"
     
-    async def delete_file_index(self, repo_id: str, file_path: str) -> bool:
+    async def delete_file_index(self, repo_url: str, file_path: str) -> bool:
         """
         Delete a file index.
         
         Args:
-            repo_id: Repository identifier
+            repo_url: Repository URL identifier
             file_path: Relative path within repository
             
         Returns:
@@ -510,17 +510,17 @@ class FileIndexer:
         """
         try:
             # Query by repoId and filePath fields to find the document to delete
-            query = self.file_indexes.where('repoId', '==', repo_id).where('filePath', '==', file_path)
+            query = self.file_indexes.where('repoId', '==', repo_url).where('filePath', '==', file_path)
             docs = query.limit(1).stream()
             
             for doc in docs:
                 doc.reference.delete()
-                logger.info(f"Deleted file index: {repo_id}:{file_path}")
+                logger.info(f"Deleted file index: {repo_url}:{file_path}")
                 return True
             
-            logger.warning(f"No file index found to delete: {repo_id}:{file_path}")
+            logger.warning(f"No file index found to delete: {repo_url}:{file_path}")
             return False
             
         except Exception as e:
-            logger.error(f"Error deleting file index {repo_id}:{file_path}: {e}")
+            logger.error(f"Error deleting file index {repo_url}:{file_path}: {e}")
             return False

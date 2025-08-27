@@ -373,9 +373,9 @@ The system implements a **two-layer deduplication strategy** to ensure optimal p
 #### **Layer 1: Content Hash Comparison**
 
 ```python
-async def should_process_file(self, repo_id: str, file_path: str, file_hash: str) -> bool:
+async def should_process_file(self, repo_url: str, file_path: str, file_hash: str) -> bool:
     # Check if file content has changed
-    existing_file = await self.get_file_index(repo_id, file_path)
+    existing_file = await self.get_file_index(repo_url, file_path)
     if existing_file and existing_file.fileHash == file_hash:
         return False  # Skip unchanged files
     return True
@@ -384,9 +384,9 @@ async def should_process_file(self, repo_id: str, file_path: str, file_hash: str
 #### **Layer 2: File-Level Timestamp Validation**
 
 ```python
-async def should_process_file_by_timestamp(self, repo_id: str, file_path: str, file_timestamp: str) -> bool:
+async def should_process_file_by_timestamp(self, repo_url: str, file_path: str, file_timestamp: str) -> bool:
     # Get last processed timestamp for this specific file
-    existing_file = await self.get_file_index(repo_id, file_path)
+    existing_file = await self.get_file_index(repo_url, file_path)
     if not existing_file or not existing_file.lastCommitTimestamp:
         return True  # First time processing this file, always process
 
@@ -397,7 +397,7 @@ async def should_process_file_by_timestamp(self, repo_id: str, file_path: str, f
     # Skip if current file modification is older than last processed
     if current_timestamp < last_timestamp:
         logger.info(f"Skipping older file modification {file_path} (timestamp: {file_timestamp}) "
-                   f"for repo {repo_id} - last processed: {existing_file.lastCommitTimestamp}")
+                   f"for repo {repo_url} - last processed: {existing_file.lastCommitTimestamp}")
         return False
 
     return True
@@ -406,22 +406,22 @@ async def should_process_file_by_timestamp(self, repo_id: str, file_path: str, f
 #### **Combined Validation in File Processing**
 
 ```python
-async def process_file(self, repo_id: str, file_path: str, commit_sha: str, file_timestamp: str):
+async def process_file(self, repo_url: str, file_path: str, commit_sha: str, file_timestamp: str):
     # First: Validate file modification timestamp
-    if not await self.should_process_file_by_timestamp(repo_id, file_path, file_timestamp):
+    if not await self.should_process_file_by_timestamp(repo_url, file_path, file_timestamp):
         logger.info(f"Skipping file {file_path} with older modification timestamp {file_timestamp}")
         return
 
     # Second: Check file content hash
-    file_content = await self.get_file_content(repo_id, file_path, commit_sha)
+    file_content = await self.get_file_content(repo_url, file_path, commit_sha)
     file_hash = hashlib.sha256(file_content.encode()).hexdigest()
 
-    if not await self.should_process_file(repo_id, file_path, file_hash):
+    if not await self.should_process_file(repo_url, file_path, file_hash):
         logger.info(f"Skipping unchanged file {file_path}")
         return
 
     # Process the file...
-    await self.parse_and_index_file(repo_id, file_path, commit_sha, file_timestamp, file_hash)
+    await self.parse_and_index_file(repo_url, file_path, commit_sha, file_timestamp, file_hash)
 ```
 
 ### Atomic Operations

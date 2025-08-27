@@ -30,13 +30,11 @@ class ProcessFileResponse(BaseModel):
     success: bool
     message: str
     file_path: str
-    repo_id: str
     processed_at: str
 
 
 class FileIndexResponse(BaseModel):
     """Response model for file index information."""
-    repo_id: str
     file_path: str
     file_hash: str
     last_commit_sha: str
@@ -75,7 +73,7 @@ async def process_file(
         # Process the file using FileIndexer
         # The FileIndexer will automatically parse the file_content to extract exports and imports
         success = await indexer.process_file(
-            repo_id=request.repo_url,
+            repo_url=request.repo_url,
             file_path=request.file_path,
             commit_sha=request.commit_sha,
             file_timestamp=request.file_timestamp,
@@ -96,7 +94,6 @@ async def process_file(
             success=True,
             message="File processed successfully",
             file_path=request.file_path,
-            repo_id=request.repo_url,
             processed_at=processed_at
         )
         
@@ -131,7 +128,6 @@ async def get_file_index(
             )
         
         return FileIndexResponse(
-            repo_id=file_index.repoId,
             file_path=file_index.filePath,
             file_hash=file_index.fileHash,
             last_commit_sha=file_index.lastCommitSHA,
@@ -171,7 +167,6 @@ async def list_repository_files(
         responses = []
         for file_index in file_indexes:
             response = FileIndexResponse(
-                repo_id=file_index.repoId,
                 file_path=file_index.filePath,
                 file_hash=file_index.fileHash,
                 last_commit_sha=file_index.lastCommitSHA,
