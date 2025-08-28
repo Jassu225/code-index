@@ -33,28 +33,32 @@ class CloudRunJobsService:
             logger.error(f"Failed to initialize Cloud Run Jobs client: {e}")
             raise
     
-    def _get_job_name(self, repo_id: str) -> str:
+    def _get_job_name(self, repo_url: str) -> str:
         """Get the full job name for Cloud Run Jobs."""
+        import hashlib
+        # Create a safe job name from repo_url by hashing it
         settings = get_settings()
-        return f"projects/{settings.gcp_project_id}/locations/{settings.cloud_run_jobs_location}/jobs/code-index-{repo_id}"
+        repo_hash = hashlib.md5(repo_url.encode()).hexdigest()[:8]
+        return f"projects/{settings.gcp_project_id}/locations/{settings.cloud_run_jobs_location}/jobs/code-index-{repo_hash}"
     
-    def _get_execution_name(self, repo_id: str, execution_id: str) -> str:
+    def _get_execution_name(self, repo_url: str, execution_id: str) -> str:
         """Get the full execution name."""
-        return f"{self._get_job_name(repo_id)}/executions/{execution_id}"
+        return f"{self._get_job_name(repo_url)}/executions/{execution_id}"
     
     async def create_repository_processing_job(
         self, 
-        repo_id: str, 
         repo_url: str,
         force_reprocess: bool = False
     ) -> Optional[str]:
         """Create a Cloud Run Job for processing a large repository."""
+        import hashlib
         try:
             if not self.client:
                 raise RuntimeError("Cloud Run Jobs client not initialized")
             
             # Check if job already exists
-            job_name = self._get_job_name(repo_id)
+            job_name = self._get_job_name(repo_url)
+            repo_hash = hashlib.md5(repo_url.encode()).hexdigest()[:8]
             
                         # Create a simple job configuration
             job = Job()
@@ -70,7 +74,7 @@ class CloudRunJobsService:
                 operation = self.client.create_job(
                     parent=f"projects/{self.settings.gcp_project_id}/locations/{self.settings.cloud_run_jobs_location}",
                     job=job,
-                    job_id=f"code-index-{repo_id}"
+                    job_id=f"code-index-{repo_hash}"
                 )
                 result = operation.result()
                 logger.info(f"Created job: {result.name}")
@@ -85,20 +89,20 @@ class CloudRunJobsService:
             )
             result_execution = operation.result()
             
-            logger.info(f"Created execution for repository {repo_id}: {result_execution.name}")
+            logger.info(f"Created execution for repository {repo_url}: {result_execution.name}")
             return result_execution.name
             
         except Exception as e:
-            logger.error(f"Failed to create processing job for repository {repo_id}: {e}")
+            logger.error(f"Failed to create processing job for repository {repo_url}: {e}")
             return None
     
-    async def get_job_status(self, repo_id: str, execution_id: str) -> Dict[str, Any]:
+    async def get_job_status(self, repo_url: str, execution_id: str) -> Dict[str, Any]:
         """Get the status of a Cloud Run Job execution."""
         try:
             if not self.client:
                 raise RuntimeError("Cloud Run Jobs client not initialized")
             
-            execution_name = self._get_execution_name(repo_id, execution_id)
+            execution_name = self._get_execution_name(repo_url, execution_id)
             execution = self.client.get_execution(name=execution_name)
             
             return {
@@ -117,19 +121,19 @@ class CloudRunJobsService:
             }
             
         except Exception as e:
-            logger.error(f"Failed to get job status for {repo_id}: {e}")
+            logger.error(f"Failed to get job status for {repo_url}: {e}")
             return {
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             }
     
-    async def list_job_executions(self, repo_id: str) -> list[Dict[str, Any]]:
+    async def list_job_executions(self, repo_url: str) -> list[Dict[str, Any]]:
         """List all executions for a specific job."""
         try:
             if not self.client:
                 raise RuntimeError("Cloud Run Jobs client not initialized")
             
-            job_name = self._get_job_name(repo_id)
+            job_name = self._get_job_name(repo_url)
             executions = self.client.list_executions(parent=job_name)
             
             execution_list = []
@@ -147,50 +151,50 @@ class CloudRunJobsService:
             return execution_list
             
         except Exception as e:
-            logger.error(f"Failed to list job executions for {repo_id}: {e}")
+            logger.error(f"Failed to list job executions for {repo_url}: {e}")
             return []
     
-    async def cancel_job_execution(self, repo_id: str, execution_id: str) -> bool:
+    async def cancel_job_execution(self, repo_url: str, execution_id: str) -> bool:
         """Cancel a running job execution."""
         try:
             if not self.client:
                 raise RuntimeError("Cloud Run Jobs client not initialized")
             
-            execution_name = self._get_execution_name(repo_id, execution_id)
+            execution_name = self._get_execution_name(repo_url, execution_id)
             operation = self.client.cancel_execution(name=execution_name)
             operation.result()
             
-            logger.info(f"Cancelled execution for repository {repo_id}: {execution_id}")
+            logger.info(f"Cancelled execution for repository {repo_url}: {execution_id}")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to cancel execution for {repo_id}: {e}")
+            logger.error(f"Failed to cancel execution for {repo_url}: {e}")
             return False
     
-    async def delete_job(self, repo_id: str) -> bool:
+    async def delete_job(self, repo_url: str) -> bool:
         """Delete a Cloud Run Job and all its executions."""
         try:
             if not self.client:
                 raise RuntimeError("Cloud Run Jobs client not initialized")
             
-            job_name = self._get_job_name(repo_id)
+            job_name = self._get_job_name(repo_url)
             operation = self.client.delete_job(name=job_name)
             operation.result()
             
-            logger.info(f"Deleted job for repository {repo_id}")
+            logger.info(f"Deleted job for repository {repo_url}")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to delete job for {repo_id}: {e}")
+            logger.error(f"Failed to delete job for {repo_url}: {e}")
             return False
     
-    async def get_job_info(self, repo_id: str) -> Dict[str, Any]:
+    async def get_job_info(self, repo_url: str) -> Dict[str, Any]:
         """Get information about a specific job."""
         try:
             if not self.client:
                 raise RuntimeError("Cloud Run Jobs client not initialized")
             
-            job_name = self._get_job_name(repo_id)
+            job_name = self._get_job_name(repo_url)
             job = self.client.get_job(name=job_name)
             
             return {
@@ -222,7 +226,7 @@ class CloudRunJobsService:
             }
             
         except Exception as e:
-            logger.error(f"Failed to get job info for {repo_id}: {e}")
+            logger.error(f"Failed to get job info for {repo_url}: {e}")
             return {
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat() + "Z"

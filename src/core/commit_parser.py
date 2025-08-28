@@ -38,7 +38,7 @@ class CommitParser:
     
     async def process_commit(
         self,
-        repo_id: str,
+        repo_url: str,
         repo_path: str,
         commit_sha: str,
         commit_timestamp: str,
@@ -48,7 +48,7 @@ class CommitParser:
         Process a single commit and update file indexes.
         
         Args:
-            repo_id: Repository identifier
+            repo_url: Repository identifier
             repo_path: Path to repository root
             commit_sha: Commit SHA
             commit_timestamp: Commit timestamp
@@ -57,31 +57,31 @@ class CommitParser:
         Returns:
             Dictionary with processing results
         """
-        logger.info(f"Processing commit {commit_sha[:8]} for repository: {repo_id}")
+        logger.info(f"Processing commit {commit_sha[:8]} for repository: {repo_url}")
         
         try:
             # Get repository metadata
-            repo_metadata = await self._get_repository_metadata(repo_id)
+            repo_metadata = await self._get_repository_metadata(repo_url)
             if not repo_metadata:
-                raise ValueError(f"Repository {repo_id} not found")
+                raise ValueError(f"Repository {repo_url} not found")
             
             # Get commit information
             commit_info = await self._analyze_commit(repo_path, commit_sha)
             
             # Process changed files
             results = await self._process_changed_files(
-                repo_id, repo_path, commit_info, commit_sha, commit_timestamp
+                repo_url, repo_path, commit_info, commit_sha, commit_timestamp
             )
             
             # Update repository metadata
             await self._update_repository_metadata(
-                repo_id, commit_sha, commit_timestamp, results
+                repo_url, commit_sha, commit_timestamp, results
             )
             
             logger.info(f"Commit {commit_sha[:8]} processed successfully")
             
             return {
-                "repo_id": repo_id,
+                "repo_url": repo_url,
                 "commit_sha": commit_sha,
                 "changed_files": len(commit_info["changed_files"]),
                 "processed": results["processed"],
@@ -169,7 +169,7 @@ class CommitParser:
     
     async def _process_changed_files(
         self,
-        repo_id: str,
+        repo_url: str,
         repo_path: str,
         commit_info: Dict[str, any],
         commit_sha: str,
@@ -179,7 +179,7 @@ class CommitParser:
         Process files changed in the commit.
         
         Args:
-            repo_id: Repository identifier
+            repo_url: Repository identifier
             repo_path: Path to repository root
             commit_info: Commit analysis information
             commit_sha: Commit SHA
@@ -224,7 +224,7 @@ class CommitParser:
                 
                 # Process the file using FileIndexer
                 success = await self.file_indexer.process_file(
-                    repo_id=repo_id,
+                    repo_url=repo_url,
                     file_path=file_path,
                     commit_sha=commit_sha,
                     file_timestamp=commit_timestamp,
@@ -287,10 +287,10 @@ class CommitParser:
         else:
             return "text"
     
-    async def _get_repository_metadata(self, repo_id: str) -> Optional[RepositoryMetadata]:
+    async def _get_repository_metadata(self, repo_url: str) -> Optional[RepositoryMetadata]:
         """Get repository metadata from Firestore."""
         try:
-            repo_ref = self.repositories.document(repo_id)
+            repo_ref = self.repositories.document(repo_url)
             doc = repo_ref.get()
             
             if doc.exists:
@@ -298,19 +298,19 @@ class CommitParser:
             return None
             
         except Exception as e:
-            logger.error(f"Error getting repository metadata for {repo_id}: {e}")
+            logger.error(f"Error getting repository metadata for {repo_url}: {e}")
             return None
     
     async def _update_repository_metadata(
         self,
-        repo_id: str,
+        repo_url: str,
         commit_sha: str,
         commit_timestamp: str,
         results: Dict[str, int]
     ):
         """Update repository metadata after processing commit."""
         try:
-            repo_ref = self.repositories.document(repo_id)
+            repo_ref = self.repositories.document(repo_url)
             
             # Get current repository data
             repo_doc = repo_ref.get()
@@ -327,5 +327,5 @@ class CommitParser:
                 })
             
         except Exception as e:
-            logger.error(f"Error updating repository metadata for {repo_id}: {e}")
+            logger.error(f"Error updating repository metadata for {repo_url}: {e}")
             raise

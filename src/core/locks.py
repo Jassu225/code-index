@@ -19,18 +19,18 @@ class FileLock:
     Lock key format: {repoId}:{filePath} (NO commit SHA in lock key)
     """
     
-    def __init__(self, repo_id: str, file_path: str, ttl_seconds: int = 300):
+    def __init__(self, repo_url: str, file_path: str, ttl_seconds: int = 300):
         """
         Initialize file lock.
         
         Args:
-            repo_id: Repository identifier
+            repo_url: Repository URL identifier
             file_path: Relative path within repository
             ttl_seconds: Lock TTL in seconds (default: 5 minutes)
         """
-        self.repo_id = repo_id
+        self.repo_url = repo_url
         self.file_path = file_path
-        self.lock_key = f"{repo_id}:{file_path}"
+        self.lock_key = f"{repo_url}:{file_path}"
         self.ttl_seconds = ttl_seconds
         self.acquired_at: Optional[datetime] = None
         self.lock_doc_ref: Optional[firestore.DocumentReference] = None
@@ -78,7 +78,7 @@ class FileLock:
             if not lock_doc.exists:
                 # No existing lock, create new one
                 transaction.set(self.lock_doc_ref, {
-                    'repo_id': self.repo_id,
+                    'repo_url': self.repo_url,
                     'file_path': self.file_path,
                     'acquired_at': now,
                     'expires_at': lock_expires_at,

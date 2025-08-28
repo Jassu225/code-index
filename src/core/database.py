@@ -80,10 +80,10 @@ class FirestoreDatabase:
             logger.error(f"Failed to create repository {repo_data.repoId}: {e}")
             return False
     
-    async def get_repository(self, repo_id: str) -> Optional[RepositoryMetadata]:
+    async def get_repository(self, repo_url: str) -> Optional[RepositoryMetadata]:
         """Retrieve a repository document from Firestore."""
         try:
-            doc_ref = self._get_document_ref("repositories", repo_id)
+            doc_ref = self._get_document_ref("repositories", repo_url)
             doc_snapshot = doc_ref.get()
             
             if doc_snapshot.exists:
@@ -93,7 +93,7 @@ class FirestoreDatabase:
                 return None
                 
         except Exception as e:
-            logger.error(f"Failed to retrieve repository {repo_id}: {e}")
+            logger.error(f"Failed to retrieve repository {repo_url}: {e}")
             return None
     
     async def list_repositories(self) -> List[RepositoryMetadata]:
@@ -117,35 +117,35 @@ class FirestoreDatabase:
             logger.error(f"Failed to list repositories: {e}")
             return []
     
-    async def update_repository(self, repo_id: str, updates: Dict[str, Any]) -> bool:
+    async def update_repository(self, repo_url: str, updates: Dict[str, Any]) -> bool:
         """Update a repository document in Firestore."""
         try:
-            doc_ref = self._get_document_ref("repositories", repo_id)
+            doc_ref = self._get_document_ref("repositories", repo_url)
             
             # Add timestamp
             updates["lastUpdated"] = datetime.utcnow().isoformat() + "Z"
             
             doc_ref.update(updates)
-            logger.info(f"Repository updated: {repo_id}")
+            logger.info(f"Repository updated: {repo_url}")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to update repository {repo_id}: {e}")
+            logger.error(f"Failed to update repository {repo_url}: {e}")
             return False
     
-    async def delete_repository(self, repo_id: str) -> bool:
+    async def delete_repository(self, repo_url: str) -> bool:
         """Delete a repository document and all related file indexes from Firestore."""
         try:
             # Start a batch write
             batch = self.client.batch()
             
             # Delete repository document
-            repo_doc_ref = self._get_document_ref("repositories", repo_id)
+            repo_doc_ref = self._get_document_ref("repositories", repo_url)
             batch.delete(repo_doc_ref)
             
             # Delete all file indexes for this repository
             file_indexes_collection = self._get_collection("file_indexes")
-            file_indexes = file_indexes_collection.where("repoId", "==", repo_id).stream()
+            file_indexes = file_indexes_collection.where("repoId", "==", repo_url).stream()
             
             for doc in file_indexes:
                 batch.delete(doc.reference)
@@ -153,11 +153,11 @@ class FirestoreDatabase:
             # Commit the batch
             batch.commit()
             
-            logger.info(f"Repository and file indexes deleted: {repo_id}")
+            logger.info(f"Repository and file indexes deleted: {repo_url}")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to delete repository {repo_id}: {e}")
+            logger.error(f"Failed to delete repository {repo_url}: {e}")
             return False
     
     async def create_file_index(self, file_index: FileIndex) -> bool:
@@ -175,10 +175,10 @@ class FirestoreDatabase:
             logger.error(f"Failed to create file index: {e}")
             return False
     
-    async def get_file_index(self, repo_id: str, file_path: str) -> Optional[FileIndex]:
+    async def get_file_index(self, repo_url: str, file_path: str) -> Optional[FileIndex]:
         """Retrieve a file index document from Firestore."""
         try:
-            doc_id = f"{repo_id}_{file_path.replace('/', '_')}"
+            doc_id = f"{repo_url}_{file_path.replace('/', '_')}"
             doc_ref = self._get_document_ref("file_indexes", doc_id)
             doc_snapshot = doc_ref.get()
             
@@ -192,11 +192,11 @@ class FirestoreDatabase:
             logger.error(f"Failed to retrieve file index: {e}")
             return None
     
-    async def list_file_indexes(self, repo_id: str) -> List[FileIndex]:
+    async def list_file_indexes(self, repo_url: str) -> List[FileIndex]:
         """List all file indexes for a specific repository."""
         try:
             collection = self._get_collection("file_indexes")
-            docs = collection.where("repoId", "==", repo_id).stream()
+            docs = collection.where("repoId", "==", repo_url).stream()
             
             file_indexes = []
             for doc in docs:
@@ -210,13 +210,13 @@ class FirestoreDatabase:
             return file_indexes
             
         except Exception as e:
-            logger.error(f"Failed to list file indexes for repository {repo_id}: {e}")
+            logger.error(f"Failed to list file indexes for repository {repo_url}: {e}")
             return []
     
-    async def update_file_index(self, repo_id: str, file_path: str, updates: Dict[str, Any]) -> bool:
+    async def update_file_index(self, repo_url: str, file_path: str, updates: Dict[str, Any]) -> bool:
         """Update a file index document in Firestore."""
         try:
-            doc_id = f"{repo_id}_{file_path.replace('/', '_')}"
+            doc_id = f"{repo_url}_{file_path.replace('/', '_')}"
             doc_ref = self._get_document_ref("file_indexes", doc_id)
             
             # Add timestamp
@@ -230,10 +230,10 @@ class FirestoreDatabase:
             logger.error(f"Failed to update file index: {e}")
             return False
     
-    async def delete_file_index(self, repo_id: str, file_path: str) -> bool:
+    async def delete_file_index(self, repo_url: str, file_path: str) -> bool:
         """Delete a file index document from Firestore."""
         try:
-            doc_id = f"{repo_id}_{file_path.replace('/', '_')}"
+            doc_id = f"{repo_url}_{file_path.replace('/', '_')}"
             doc_ref = self._get_document_ref("file_indexes", doc_id)
             doc_ref.delete()
             
@@ -265,14 +265,14 @@ class FirestoreDatabase:
             logger.error(f"Failed to batch write file indexes: {e}")
             return False
     
-    async def search_exports(self, repo_id: str, query: str, limit: int = 100) -> List[FileIndex]:
+    async def search_exports(self, repo_url: str, query: str, limit: int = 100) -> List[FileIndex]:
         """Search for exports containing the query string."""
         try:
             collection = self._get_collection("file_indexes")
             
             # Firestore doesn't support full-text search, so we'll do a basic query
             # In production, consider using Algolia or similar for better search
-            docs = collection.where("repoId", "==", repo_id).limit(limit).stream()
+            docs = collection.where("repoId", "==", repo_url).limit(limit).stream()
             
             results = []
             for doc in docs:

@@ -51,7 +51,6 @@ class RepositoryProcessor:
         
     async def process_repository(
         self, 
-        repo_id: str, 
         repo_url: str, 
         force_reprocess: bool = False
     ) -> bool:
@@ -59,7 +58,6 @@ class RepositoryProcessor:
         Process an entire repository for code indexing.
         
         Args:
-            repo_id: Repository identifier
             repo_url: Repository URL
             force_reprocess: Whether to reprocess all files
             
@@ -67,29 +65,29 @@ class RepositoryProcessor:
             True if processing completed successfully, False otherwise
         """
         try:
-            logger.info(f"Starting repository processing: {repo_id}")
+            logger.info(f"Starting repository processing: {repo_url}")
             
             # Update repository status
-            await self.db.update_repository(repo_id, {
+            await self.db.update_repository(repo_url, {
                 "status": "processing",
                 "lastUpdated": datetime.utcnow().isoformat() + "Z"
             })
             
             # Get repository metadata
-            repo_metadata = await self.db.get_repository(repo_id)
+            repo_metadata = await self.db.get_repository(repo_url)
             if not repo_metadata:
-                logger.error(f"Repository not found: {repo_id}")
+                logger.error(f"Repository not found: {repo_url}")
                 return False
             
             # Get list of files to process
-            files_to_process = await self._get_files_to_process(repo_id, force_reprocess)
+            files_to_process = await self._get_files_to_process(repo_url, force_reprocess)
             
             if not files_to_process:
-                logger.info(f"No files to process for repository: {repo_id}")
-                await self._mark_repository_complete(repo_id, repo_metadata)
+                logger.info(f"No files to process for repository: {repo_url}")
+                await self._mark_repository_complete(repo_url, repo_metadata)
                 return True
             
-            logger.info(f"Processing {len(files_to_process)} files for repository: {repo_id}")
+            logger.info(f"Processing {len(files_to_process)} files for repository: {repo_url}")
             
             # Process files in batches
             total_files = len(files_to_process)
@@ -104,7 +102,7 @@ class RepositoryProcessor:
                 logger.info(f"Processing batch {batch_start}-{batch_end} of {total_files}")
                 
                 # Process batch
-                batch_results = await self._process_file_batch(repo_id, batch)
+                batch_results = await self._process_file_batch(repo_url, batch)
                 
                 # Update progress
                 processed_files += batch_results["successful"]
@@ -112,7 +110,7 @@ class RepositoryProcessor:
                 
                 # Update repository progress
                 await self._update_repository_progress(
-                    repo_id, 
+                    repo_url, 
                     processed_files, 
                     total_files, 
                     failed_files
@@ -123,21 +121,21 @@ class RepositoryProcessor:
                     await asyncio.sleep(1)
             
             # Mark repository as complete
-            await self._mark_repository_complete(repo_id, repo_metadata)
+            await self._mark_repository_complete(repo_url, repo_metadata)
             
-            logger.info(f"Repository processing completed: {repo_id}")
+            logger.info(f"Repository processing completed: {repo_url}")
             logger.info(f"Total files: {total_files}, Processed: {processed_files}, Failed: {failed_files}")
             
             return failed_files == 0
             
         except Exception as e:
-            logger.error(f"Error processing repository {repo_id}: {e}")
-            await self._mark_repository_failed(repo_id, str(e))
+            logger.error(f"Error processing repository {repo_url}: {e}")
+            await self._mark_repository_failed(repo_url, str(e))
             return False
     
     async def _get_files_to_process(
         self, 
-        repo_id: str, 
+        repo_url: str, 
         force_reprocess: bool
     ) -> List[str]:
         """Get list of files that need processing."""
@@ -165,7 +163,7 @@ class RepositoryProcessor:
             # Check which files actually need processing
             files_to_process = []
             for file_path in mock_files:
-                existing_index = await self.db.get_file_index(repo_id, file_path)
+                existing_index = await self.db.get_file_index(repo_url, file_path)
                 if not existing_index:
                     files_to_process.append(file_path)
             
@@ -177,7 +175,7 @@ class RepositoryProcessor:
     
     async def _process_file_batch(
         self, 
-        repo_id: str, 
+        repo_url: str, 
         file_paths: List[str]
     ) -> dict:
         """Process a batch of files."""
@@ -187,7 +185,7 @@ class RepositoryProcessor:
         for file_path in file_paths:
             try:
                 # Acquire file lock
-                lock_key = f"{repo_id}:{file_path}"
+                lock_key = f"{repo_url}:{file_path}"
                 lock_acquired = await self.lock_manager.acquire_lock(lock_key, timeout=30)
                 
                 if not lock_acquired:
@@ -197,7 +195,7 @@ class RepositoryProcessor:
                 
                 try:
                     # Process the file
-                    await self._process_single_file(repo_id, file_path)
+                    await self._process_single_file(repo_url, file_path)
                     successful += 1
                     
                 finally:
@@ -210,7 +208,7 @@ class RepositoryProcessor:
         
         return {"successful": successful, "failed": failed}
     
-    async def _process_single_file(self, repo_id: str, file_path: str):
+    async def _process_single_file(self, repo_url: str, file_path: str):
         """Process a single file for indexing."""
         try:
             # This would involve:
@@ -227,7 +225,7 @@ class RepositoryProcessor:
             
             # Create mock file index
             mock_index = {
-                "repoId": repo_id,
+                "repoId": repo_url,
                 "filePath": file_path,
                 "fileHash": f"mock_hash_{file_path}",
                 "lastCommitSHA": "mock_commit_sha",
@@ -240,7 +238,7 @@ class RepositoryProcessor:
             }
             
             # Store in database
-            await self.db.create_or_update_file_index(repo_id, file_path, mock_index)
+            await self.db.create_or_update_file_index(repo_url, file_path, mock_index)
             
         except Exception as e:
             logger.error(f"Error processing single file {file_path}: {e}")
@@ -248,7 +246,7 @@ class RepositoryProcessor:
     
     async def _update_repository_progress(
         self, 
-        repo_id: str, 
+        repo_url: str, 
         processed: int, 
         total: int, 
         failed: int
@@ -263,15 +261,15 @@ class RepositoryProcessor:
                 "lastUpdated": datetime.utcnow().isoformat() + "Z"
             }
             
-            await self.db.update_repository(repo_id, progress)
+            await self.db.update_repository(repo_url, progress)
             
         except Exception as e:
             logger.error(f"Error updating repository progress: {e}")
     
-    async def _mark_repository_complete(self, repo_id: str, repo_metadata):
+    async def _mark_repository_complete(self, repo_url: str, repo_metadata):
         """Mark repository as successfully processed."""
         try:
-            await self.db.update_repository(repo_id, {
+            await self.db.update_repository(repo_url, {
                 "status": "completed",
                 "lastUpdated": datetime.utcnow().isoformat() + "Z",
                 "lastProcessedCommit": "mock_commit_sha",
@@ -281,10 +279,10 @@ class RepositoryProcessor:
         except Exception as e:
             logger.error(f"Error marking repository complete: {e}")
     
-    async def _mark_repository_failed(self, repo_id: str, error_message: str):
+    async def _mark_repository_failed(self, repo_url: str, error_message: str):
         """Mark repository as failed."""
         try:
-            await self.db.update_repository(repo_id, {
+            await self.db.update_repository(repo_url, {
                 "status": "failed",
                 "lastUpdated": datetime.utcnow().isoformat() + "Z",
                 "errorMessage": error_message
@@ -297,7 +295,6 @@ class RepositoryProcessor:
 async def main():
     """Main entry point for the Cloud Run Job."""
     parser = argparse.ArgumentParser(description="Process repository for code indexing")
-    parser.add_argument("--repo-id", required=True, help="Repository ID to process")
     parser.add_argument("--repo-url", required=True, help="Repository URL")
     parser.add_argument("--force-reprocess", action="store_true", help="Force reprocessing of all files")
     parser.add_argument("--project-id", help="GCP Project ID")
@@ -312,14 +309,12 @@ async def main():
         os.environ["GCP_REGION"] = args.region
     
     logger.info(f"Starting repository processing job")
-    logger.info(f"Repository ID: {args.repo_id}")
     logger.info(f"Repository URL: {args.repo_url}")
     logger.info(f"Force reprocess: {args.force_reprocess}")
     
     try:
         processor = RepositoryProcessor()
         success = await processor.process_repository(
-            args.repo_id, 
             args.repo_url, 
             args.force_reprocess
         )
