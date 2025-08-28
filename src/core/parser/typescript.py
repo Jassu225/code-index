@@ -1,48 +1,191 @@
 """
-Code parsing engine using Tree-sitter for multi-language support.
+TypeScript/JavaScript parser using Tree-sitter.
 """
 
 import logging
-import os
 from pathlib import Path
-from typing import List, Optional, Dict, Any
-from tree_sitter import Language, Parser, Node
+from typing import List, Optional
+from tree_sitter import Node
 
-from ..models.file_index import ExportInfo, ImportInfo, FunctionSignature, Parameter, ClassInfo, InterfaceInfo
+from ...models.file_index import ExportInfo, ImportInfo, FunctionSignature, Parameter, ClassInfo, InterfaceInfo
+from .base import LanguageParser, ParseResult
 
 logger = logging.getLogger(__name__)
 
 
-class ParseResult:
-    """Result of parsing a file."""
+class TypescriptClassParser:
+    """Dedicated parser for TypeScript class information."""
     
     def __init__(self):
-        self.exports: List[ExportInfo] = []
-        self.imports: List[ImportInfo] = []
-        self.language: str = ""
-        self.parse_errors: List[str] = []
-
-
-class LanguageParser:
-    """Base class for language-specific parsers."""
+        pass
     
-    def __init__(self, language_name: str):
-        self.language_name = language_name
-        self.parser = Parser()
-        self.language = None
+    def parse_class_info(self, class_name: str, content: str, line_num: int) -> ClassInfo:
+        """Parse TypeScript class information from content."""
+        import re
         
-    def set_language(self, language: Language):
-        """Set the Tree-sitter language for this parser."""
-        self.language = language
-        self.parser.set_language(language)
+        # Find the class definition block - handle generic types like TsArray<T>
+        class_start_pattern = rf'export\s+class\s+{re.escape(class_name)}(?:\s*<[^>]*>)?\s*{{'
+        class_start_match = re.search(class_start_pattern, content)
+        
+        if not class_start_match:
+            return ClassInfo(
+                extends=None,
+                implements=[],
+                methods=[],
+                properties=[],
+                constructors=[]
+            )
+        
+        # Find the matching closing brace by counting braces
+        start_pos = class_start_match.end() - 1  # Position of the opening brace
+        brace_count = 0
+        end_pos = start_pos
+        
+        for i, char in enumerate(content[start_pos:], start_pos):
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_pos = i
+                    break
+        
+        if brace_count != 0:
+            return ClassInfo(
+                extends=None,
+                implements=[],
+                methods=[],
+                properties=[],
+                constructors=[]
+            )
+        
+        class_body = content[start_pos + 1:end_pos]
+        
+        # Extract methods (public methods) - comprehensive pattern
+        # Handle methods with and without return types, with and without parameters
+        method_pattern = r'(?:public\s+|private\s+)?(?:get\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*[^{]+)?\s*{'
+        methods = []
+        seen_methods = set()
+        
+        for match in re.finditer(method_pattern, class_body):
+            method_name = match.group(1)
+            if (method_name != class_name and 
+                method_name != 'constructor' and 
+                method_name not in seen_methods):  # Skip duplicates
+                seen_methods.add(method_name)
+                # Calculate actual line number within class body
+                method_line = line_num + class_body[:match.start()].count('\n') + 1
+                methods.append(ExportInfo(
+                    name=method_name,
+                    type="function",
+                    visibility="public",
+                    lineNumber=method_line
+                ))
+        
+        # Extract properties (avoid duplicates and parameter confusion)
+        # Look for class properties with more specific patterns
+        property_patterns = [
+            r'(?:public\s+|private\s+)?(\w+)\s*:\s*\w+(?:\s*=\s*[^;]+)?;',  # Class properties
+            r'(?:public\s+|private\s+)?(\w+)\s*:\s*\w+\[\]',  # Array properties
+        ]
+        properties = []
+        seen_properties = set()
+        
+        for pattern in property_patterns:
+            for match in re.finditer(pattern, class_body):
+                prop_name = match.group(1)
+                # Skip if it's a reserved word, already seen, or looks like a parameter
+                if (prop_name not in ['extends', 'implements'] and 
+                    prop_name not in seen_properties and
+                    prop_name not in ['element', 'index', 'newName'] and  # Skip parameter names
+                    not re.search(rf'\b{re.escape(prop_name)}\s*\(', class_body)):  # Skip if it's a method
+                    seen_properties.add(prop_name)
+                    # Calculate actual line number within class body
+                    prop_line = line_num + class_body[:match.start()].count('\n') + 1
+                    properties.append(ExportInfo(
+                        name=prop_name,
+                        type="variable",
+                        visibility="public",
+                        lineNumber=prop_line
+                    ))
+        
+        # Extract constructor
+        constructor_pattern = rf'constructor\s*\([^)]*\)\s*{{'
+        constructors = []
+        constructor_match = re.search(constructor_pattern, class_body)
+        if constructor_match:
+            # Calculate actual line number within class body
+            constructor_line = line_num + class_body[:constructor_match.start()].count('\n') + 1
+            constructors.append(ExportInfo(
+                name="constructor",
+                type="function",
+                visibility="public",
+                lineNumber=constructor_line
+            ))
+        
+        return ClassInfo(
+            extends=None,  # Would need more complex parsing for extends
+            implements=[],  # Would need more complex parsing for implements
+            methods=methods,
+            properties=properties,
+            constructors=constructors
+        )
+
+
+class TypescriptFallbackParser:
+    """Parser for TypeScript fallback scenarios when Tree-sitter fails."""
     
-    def parse(self, content: str) -> ParseResult:
-        """Parse file content and extract exports/imports."""
-        raise NotImplementedError("Subclasses must implement parse method")
+    def __init__(self):
+        pass
     
-    def detect_language(self, file_path: str) -> bool:
-        """Check if this parser can handle the given file."""
-        raise NotImplementedError("Subclasses must implement detect_language method")
+    def parse_function_signature(self, func_name: str, content: str, line_num: int) -> FunctionSignature:
+        """Parse function signature using regex fallback."""
+        import re
+        
+        # Find the function definition
+        func_pattern = rf'export\s+function\s+{re.escape(func_name)}\s*\(([^)]*)\)\s*(?::\s*(\w+))?'
+        func_match = re.search(func_pattern, content)
+        
+        if not func_match:
+            return FunctionSignature(
+                parameters=[],
+                returnType="any",
+                isAsync=False,
+                isGenerator=False,
+                overloads=[]
+            )
+        
+        # Extract parameters
+        params_text = func_match.group(1)
+        parameters = []
+        if params_text.strip():
+            param_names = [p.strip().split(':')[0].strip() for p in params_text.split(',')]
+            for param_name in param_names:
+                if param_name:
+                    parameters.append(Parameter(
+                        name=param_name,
+                        type="any",
+                        required=True,
+                        defaultValue=None,
+                        description=None
+                    ))
+        
+        # Extract return type
+        return_type = func_match.group(2) if func_match.group(2) else "any"
+        
+        # Check if async
+        is_async = 'async' in content[:func_match.start()]
+        
+        # Check if generator
+        is_generator = '*' in content[:func_match.start()]
+        
+        return FunctionSignature(
+            parameters=parameters,
+            returnType=return_type,
+            isAsync=is_async,
+            isGenerator=is_generator,
+            overloads=[]
+        )
 
 
 class TypeScriptParser(LanguageParser):
@@ -50,6 +193,8 @@ class TypeScriptParser(LanguageParser):
     
     def __init__(self):
         super().__init__("typescript")
+        self.class_parser = TypescriptClassParser()
+        self.fallback_parser = TypescriptFallbackParser()
     
     def detect_language(self, file_path: str) -> bool:
         """Check if file is TypeScript/JavaScript."""
@@ -653,27 +798,43 @@ class TypeScriptParser(LanguageParser):
         import re
         exports = []
         
-        # Simple regex patterns for common export statements
+        # More specific regex patterns to detect export types
         export_patterns = [
-            r'export\s+(?:const|let|var|function|class|interface|type)\s+(\w+)',
-            r'export\s+{\s*(\w+)(?:\s*,\s*\w+)*\s*}',
-            r'export\s+default\s+(\w+)',
-            r'export\s+(\w+)\s*=\s*\w+',
+            (r'export\s+function\s+(\w+)', 'function'),
+            (r'export\s+class\s+(\w+)', 'class'),
+            (r'export\s+interface\s+(\w+)', 'interface'),
+            (r'export\s+(?:const|let|var)\s+(\w+)', 'variable'),
+            (r'export\s+type\s+(\w+)', 'type'),
+            (r'export\s+{\s*(\w+)(?:\s*,\s*\w+)*\s*}', 'variable'),
+            (r'export\s+default\s+(\w+)', 'variable'),
+            (r'export\s+(\w+)\s*=\s*\w+', 'variable'),
         ]
         
-        for pattern in export_patterns:
+        for pattern, export_type in export_patterns:
             matches = re.finditer(pattern, content, re.MULTILINE)
             for match in matches:
                 name = match.group(1)
                 if name:
                     # Find line number
                     line_num = content[:match.start()].count('\n') + 1
-                    exports.append(ExportInfo(
+                    
+                    # Create export info with proper type
+                    export_info = ExportInfo(
                         name=name,
-                        type='variable',  # Default type
+                        type=export_type,
                         visibility='public',
                         lineNumber=line_num
-                    ))
+                    )
+                    
+                    # Add type-specific information for classes
+                    if export_type == 'class':
+                        class_info = self.class_parser.parse_class_info(name, content, line_num)
+                        export_info.classInfo = class_info
+                    elif export_type == 'function':
+                        function_signature = self.fallback_parser.parse_function_signature(name, content, line_num)
+                        export_info.functionSignature = function_signature
+                    
+                    exports.append(export_info)
         
         return exports
     
@@ -698,478 +859,3 @@ class TypeScriptParser(LanguageParser):
                 ))
         
         return imports
-
-
-class PythonParser(LanguageParser):
-    """Python parser using Tree-sitter."""
-    
-    def __init__(self):
-        super().__init__("python")
-    
-    def detect_language(self, file_path: str) -> bool:
-        """Check if file is Python."""
-        ext = Path(file_path).suffix.lower()
-        return ext in ['.py', '.pyi']
-    
-    def parse(self, content: str) -> ParseResult:
-        """Parse Python content."""
-        if not self.language:
-            raise RuntimeError("Language not set for Python parser")
-        
-        result = ParseResult()
-        result.language = self.language_name
-        
-        try:
-            # Try Tree-sitter parsing first
-            tree = self.parser.parse(bytes(content, 'utf8'))
-            root_node = tree.root_node
-            
-            # Extract exports and imports
-            result.exports = self._extract_exports(root_node, content)
-            result.imports = self._extract_imports(root_node, content)
-            
-        except Exception as e:
-            logger.info(f"Tree-sitter parsing failed, using regex fallback: {e}")
-            # Fallback to simple regex parsing
-            result.exports = self._extract_exports_regex(content)
-            result.imports = self._extract_imports_regex(content)
-        
-        return result
-    
-    def _extract_exports(self, root_node: Node, content: str) -> List[ExportInfo]:
-        """Extract exports from Python AST."""
-        exports = []
-        
-        # Python doesn't have explicit exports like TypeScript
-        # We'll look for function definitions, class definitions, and variable assignments
-        # that are at module level (not inside functions/classes)
-        
-        # Find function definitions
-        func_nodes = self._find_nodes_by_type(root_node, 'function_definition')
-        for func_node in func_nodes:
-            try:
-                export_info = self._parse_python_function(func_node, content)
-                if export_info:
-                    exports.append(export_info)
-            except Exception as e:
-                logger.warning(f"Error parsing Python function: {e}")
-                continue
-        
-        # Find class definitions
-        class_nodes = self._find_nodes_by_type(root_node, 'class_definition')
-        for class_node in class_nodes:
-            try:
-                export_info = self._parse_python_class(class_node, content)
-                if export_info:
-                    exports.append(export_info)
-            except Exception as e:
-                logger.warning(f"Error parsing Python class: {e}")
-                continue
-        
-        return exports
-    
-    def _extract_imports(self, root_node: Node, content: str) -> List[ImportInfo]:
-        """Extract imports from Python AST."""
-        imports = []
-        
-        # Find import statements
-        import_nodes = self._find_nodes_by_type(root_node, 'import_statement')
-        
-        for import_node in import_nodes:
-            try:
-                import_info = self._parse_python_import(import_node, content)
-                if import_info:
-                    imports.extend(import_info)
-            except Exception as e:
-                logger.warning(f"Error parsing Python import: {e}")
-                continue
-        
-        return imports
-    
-    def _parse_python_function(self, func_node: Node, content: str) -> Optional[ExportInfo]:
-        """Parse a Python function definition."""
-        try:
-            # Get line number
-            line_number = func_node.start_point[0] + 1
-            
-            # Extract function name
-            name = self._extract_python_function_name(func_node)
-            
-            # Parse function signature
-            function_signature = self._parse_python_function_signature(func_node, content)
-            
-            return ExportInfo(
-                name=name,
-                type="function",
-                visibility="public",
-                lineNumber=line_number,
-                functionSignature=function_signature
-            )
-            
-        except Exception as e:
-            logger.warning(f"Error parsing Python function: {e}")
-            return None
-    
-    def _parse_python_class(self, class_node: Node, content: str) -> Optional[ExportInfo]:
-        """Parse a Python class definition."""
-        try:
-            # Get line number
-            line_number = class_node.start_point[0] + 1
-            
-            # Extract class name
-            name = self._extract_python_class_name(class_node)
-            
-            # Parse class information
-            class_info = self._parse_python_class_info(class_node, content)
-            
-            return ExportInfo(
-                name=name,
-                type="class",
-                visibility="public",
-                lineNumber=line_number,
-                classInfo=class_info
-            )
-            
-        except Exception as e:
-            logger.warning(f"Error parsing Python class: {e}")
-            return None
-    
-    # Helper methods for Python parsing
-    def _find_nodes_by_type(self, root: Node, node_type: str) -> List[Node]:
-        """Find all nodes of a specific type in the AST."""
-        nodes = []
-        
-        def traverse(node):
-            if node.type == node_type:
-                nodes.append(node)
-            for child in node.children:
-                traverse(child)
-        
-        traverse(root)
-        return nodes
-    
-    def _extract_python_function_name(self, func_node: Node) -> str:
-        """Extract function name from Python function definition."""
-        name_node = self._find_child_by_type(func_node, 'identifier')
-        if name_node:
-            return name_node.text.decode('utf8')
-        return "anonymous_function"
-    
-    def _extract_python_class_name(self, class_node: Node) -> str:
-        """Extract class name from Python class definition."""
-        name_node = self._find_child_by_type(class_node, 'identifier')
-        if name_node:
-            return name_node.text.decode('utf8')
-        return "anonymous_class"
-    
-    def _find_child_by_type(self, parent: Node, child_type: str) -> Optional[Node]:
-        """Find first child node of a specific type."""
-        for child in parent.children:
-            if child.type == child_type:
-                return child
-        return None
-    
-    def _parse_python_function_signature(self, func_node: Node, content: str) -> FunctionSignature:
-        """Parse Python function signature."""
-        # Extract parameters
-        parameters = self._extract_python_parameters(func_node, content)
-        
-        # Extract return type annotation
-        return_type = self._extract_python_return_type(func_node, content)
-        
-        return FunctionSignature(
-            parameters=parameters,
-            returnType=return_type or "any",
-            isAsync=False,  # Python async functions would need additional parsing
-            isGenerator=False,
-            overloads=[]
-        )
-    
-    def _extract_python_parameters(self, func_node: Node, content: str) -> List[Parameter]:
-        """Extract parameters from Python function."""
-        parameters = []
-        
-        # Find parameter list
-        param_list = self._find_child_by_type(func_node, 'parameters')
-        if not param_list:
-            return parameters
-        
-        # Extract individual parameters
-        param_nodes = self._find_nodes_by_type(param_list, 'typed_parameter')
-        
-        for param_node in param_nodes:
-            try:
-                param_name = self._extract_node_text(param_node, content)
-                param_type = self._extract_python_parameter_type(param_node, content)
-                
-                parameters.append(Parameter(
-                    name=param_name,
-                    type=param_type or "any",
-                    required=True,
-                    defaultValue=None,
-                    description=None
-                ))
-            except Exception as e:
-                logger.warning(f"Error parsing Python parameter: {e}")
-                continue
-        
-        return parameters
-    
-    def _extract_node_text(self, node: Node, content: str) -> str:
-        """Extract text content from a node."""
-        start_byte = node.start_byte
-        end_byte = node.end_byte
-        return content[start_byte:end_byte].strip()
-    
-    def _extract_python_parameter_type(self, param_node: Node, content: str) -> Optional[str]:
-        """Extract parameter type annotation from Python parameter."""
-        type_node = self._find_child_by_type(param_node, 'type')
-        if type_node:
-            return self._extract_node_text(type_node, content)
-        return None
-    
-    def _extract_python_return_type(self, func_node: Node, content: str) -> Optional[str]:
-        """Extract return type annotation from Python function."""
-        # Look for return type annotation
-        type_node = self._find_child_by_type(func_node, 'type')
-        if type_node:
-            return self._extract_node_text(type_node, content)
-        return None
-    
-    def _parse_python_class_info(self, class_node: Node, content: str) -> ClassInfo:
-        """Parse Python class information."""
-        # Extract methods
-        methods = []
-        method_nodes = self._find_nodes_by_type(class_node, 'function_definition')
-        
-        for method_node in method_nodes:
-            try:
-                method_info = self._parse_python_function(method_node, content)
-                if method_info:
-                    methods.append(method_info)
-            except Exception as e:
-                logger.warning(f"Error parsing Python class method: {e}")
-                continue
-        
-        return ClassInfo(
-            extends=None,  # Python inheritance would need additional parsing
-            implements=[],
-            methods=methods,
-            properties=[],
-            constructors=[]
-        )
-    
-    def _parse_python_import(self, import_node: Node, content: str) -> List[ImportInfo]:
-        """Parse Python import statement."""
-        imports = []
-        
-        try:
-            # Get line number
-            line_number = import_node.start_point[0] + 1
-            
-            # Extract import source
-            source = self._extract_python_import_source(import_node, content)
-            
-            # Extract import names
-            names = self._extract_python_import_names(import_node, content)
-            
-            # Create import info for each imported item
-            for name in names:
-                imports.append(ImportInfo(
-                    name=name,
-                    source=source,
-                    lineNumber=line_number
-                ))
-            
-        except Exception as e:
-            logger.warning(f"Error parsing Python import: {e}")
-        
-        return imports
-    
-    def _extract_python_import_source(self, import_node: Node, content: str) -> str:
-        """Extract import source from Python import statement."""
-        # Look for dotted name or identifier
-        dotted_name = self._find_child_by_type(import_node, 'dotted_name')
-        if dotted_name:
-            return self._extract_node_text(dotted_name, content)
-        
-        identifier = self._find_child_by_type(import_node, 'identifier')
-        if identifier:
-            return self._extract_node_text(identifier, content)
-        
-        return "unknown_source"
-    
-    def _extract_python_import_names(self, import_node: Node, content: str) -> List[str]:
-        """Extract names from Python import statement."""
-        names = []
-        
-        # Look for import specifiers
-        specifier_list = self._find_child_by_type(import_node, 'import_specifier')
-        if specifier_list:
-            for specifier in specifier_list.children:
-                if specifier.type == 'identifier':
-                    names.append(specifier.text.decode('utf8'))
-        
-        return names
-    
-    def _extract_exports_regex(self, content: str) -> List[ExportInfo]:
-        """Extract exports using regex fallback."""
-        import re
-        exports = []
-        
-        # Simple regex patterns for Python exports
-        export_patterns = [
-            r'def\s+(\w+)\s*\(',
-            r'class\s+(\w+)',
-            r'(\w+)\s*=\s*\w+',  # Variable assignments
-        ]
-        
-        for pattern in export_patterns:
-            matches = re.finditer(pattern, content, re.MULTILINE)
-            for match in matches:
-                name = match.group(1)
-                if name:
-                    # Find line number
-                    line_num = content[:match.start()].count('\n') + 1
-                    # Determine type based on pattern
-                    if 'def' in pattern:
-                        export_type = 'function'
-                    elif 'class' in pattern:
-                        export_type = 'class'
-                    else:
-                        export_type = 'variable'
-                    
-                    exports.append(ExportInfo(
-                        name=name,
-                        type=export_type,
-                        visibility='public',
-                        lineNumber=line_num
-                    ))
-        
-        return exports
-    
-    def _extract_imports_regex(self, content: str) -> List[ImportInfo]:
-        """Extract imports using regex fallback."""
-        import re
-        imports = []
-        
-        # Simple regex pattern for Python imports
-        import_patterns = [
-            r'import\s+(\w+)',
-            r'from\s+([\w.]+)\s+import',
-        ]
-        
-        for pattern in import_patterns:
-            matches = re.finditer(pattern, content, re.MULTILINE)
-            for match in matches:
-                source = match.group(1)
-                if source:
-                    # Find line number
-                    line_num = content[:match.start()].count('\n') + 1
-                    imports.append(ImportInfo(
-                        name='import',  # Default name
-                        source=source,
-                        lineNumber=line_num
-                    ))
-        
-        return imports
-    
-
-
-
-class CodeParser:
-    """
-    Main code parser that delegates to language-specific parsers.
-    """
-    
-    def __init__(self):
-        """Initialize the code parser with supported languages."""
-        self.parsers: Dict[str, LanguageParser] = {
-            'typescript': TypeScriptParser(),
-            'python': PythonParser(),
-        }
-        
-        # Initialize Tree-sitter languages
-        self._initialize_languages()
-    
-    def _initialize_languages(self):
-        """Initialize Tree-sitter languages."""
-        try:
-            # In a real implementation, you'd build and load the Tree-sitter grammars
-            # For now, we'll create mock languages
-            logger.info("Initializing Tree-sitter languages...")
-            
-            # This would normally load actual grammar files
-            # For now, we'll skip the actual language loading
-            
-            # Set mock languages for basic functionality
-            for parser in self.parsers.values():
-                # Create a mock language object that won't crash
-                class MockLanguage:
-                    def __init__(self, name):
-                        self.name = name
-                
-                parser.language = MockLanguage(parser.language_name)
-            
-        except Exception as e:
-            logger.error(f"Error initializing Tree-sitter languages: {e}")
-    
-    def detect_language(self, file_path: str) -> str:
-        """
-        Detect programming language based on file extension.
-        
-        Args:
-            file_path: Path to the file
-            
-        Returns:
-            Language identifier
-        """
-        ext = Path(file_path).suffix.lower()
-        
-        if ext in ['.ts', '.tsx', '.js', '.jsx']:
-            return 'typescript'
-        elif ext in ['.py', '.pyi']:
-            return 'python'
-        elif ext in ['.go']:
-            return 'go'
-        elif ext in ['.java']:
-            return 'java'
-        elif ext in ['.cs']:
-            return 'csharp'
-        else:
-            return 'unknown'
-    
-    async def parse_file(self, file_path: str, content: str) -> ParseResult:
-        """
-        Parse a file and extract exports/imports.
-        
-        Args:
-            file_path: Path to the file
-            content: File content
-            
-        Returns:
-            ParseResult with extracted information
-        """
-        language = self.detect_language(file_path)
-        
-        if language == 'unknown':
-            result = ParseResult()
-            result.language = language
-            result.parse_errors.append(f"Unsupported language for file: {file_path}")
-            return result
-        
-        parser = self.parsers.get(language)
-        if not parser:
-            result = ParseResult()
-            result.language = language
-            result.parse_errors.append(f"No parser available for language: {language}")
-            return result
-        
-        try:
-            print(f"Parsing {file_path} with {language} parser")
-            return parser.parse(content)
-        except Exception as e:
-            result = ParseResult()
-            result.language = language
-            result.parse_errors.append(f"Error parsing {language} file: {e}")
-            return result
