@@ -5,6 +5,7 @@ Main FastAPI application entry point for the Serverless Code Index System.
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Any
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,19 +48,26 @@ async def lifespan(app: FastAPI):
         settings = get_settings()
         logger.info(f"Configuration loaded for project: {settings.gcp_project_id}")
         
-        # Initialize database connection
-        db = get_database()
-        logger.info("Database connection initialized")
+        # Initialize database connection - this might fail without proper GCP setup
+        try:
+            db = get_database()
+            logger.info("Database connection initialized")
+        except Exception as db_error:
+            logger.warning(f"Database initialization failed (continuing anyway): {db_error}")
         
-        # Initialize Cloud Run Jobs service
-        jobs_service = get_jobs_service()
-        logger.info("Cloud Run Jobs service initialized")
+        # Initialize Cloud Run Jobs service - this might fail without proper GCP setup
+        try:
+            jobs_service = get_jobs_service()
+            logger.info("Cloud Run Jobs service initialized")
+        except Exception as jobs_error:
+            logger.warning(f"Cloud Run Jobs initialization failed (continuing anyway): {jobs_error}")
         
-        logger.info("All services initialized successfully")
+        logger.info("Application startup completed (some services may be unavailable)")
         
     except Exception as e:
-        logger.error(f"Failed to initialize services: {e}")
-        raise
+        logger.error(f"Critical error during startup: {e}")
+        logger.warning("Continuing with limited functionality...")
+        # Don't raise the exception - continue with limited functionality
     
     yield
     

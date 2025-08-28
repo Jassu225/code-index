@@ -3,8 +3,9 @@ Configuration management for the Serverless Code Index System.
 """
 
 import os
-from typing import Optional, List
-from pydantic import Field
+import json
+from typing import Optional, List, Union
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,7 +18,7 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, env="DEBUG")
     
     # GCP Project settings
-    gcp_project_id: str = Field(default="code-index-dev", env="GCP_PROJECT_ID")
+    gcp_project_id: str = Field(default="icode-94891", env="GCP_PROJECT_ID")
     gcp_region: str = Field(default="us-central1", env="GCP_REGION")
     
     # Firestore settings
@@ -42,6 +43,22 @@ class Settings(BaseSettings):
     # API settings
     cors_origins: List[str] = Field(default=["*"], env="CORS_ORIGINS")
     api_rate_limit: int = Field(default=1000, env="API_RATE_LIMIT")  # requests per minute
+    
+    @field_validator('cors_origins', mode='before')
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """Parse CORS origins from various input formats."""
+        if isinstance(v, str):
+            # Try to parse as JSON first
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                # If not valid JSON, treat as comma-separated string
+                return [origin.strip() for origin in v.split(',') if origin.strip()]
+        elif isinstance(v, list):
+            return v
+        else:
+            return ["*"]
     
     model_config = SettingsConfigDict(
         env_file=".env",

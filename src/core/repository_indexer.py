@@ -5,6 +5,7 @@ Repository indexer for first-time repository processing.
 
 import logging
 import os
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -79,10 +80,10 @@ class RepositoryIndexer:
                 status="processing"
             )
             
-            # Store repository metadata
-            repo_ref = self.repositories.document(repo_url)
-            repo_ref.set(repo_metadata.model_dump())
-            logger.info(f"Created repository metadata: {repo_url}")
+            # Store repository metadata with auto-generated UID
+            doc_ref = self.repositories.add(repo_metadata.model_dump())
+            repo_uid = doc_ref[1].id  # Get the auto-generated UID
+            logger.info(f"Created repository metadata with UID: {repo_uid}")
             
             try:
                 # Get files to process
@@ -105,11 +106,14 @@ class RepositoryIndexer:
                 "lastUpdated": datetime.utcnow().isoformat() + 'Z'
             }
             
+            # Get the document reference using the UID
+            repo_ref = self.repositories.document(repo_uid)
             repo_ref.update(final_status)
-            logger.info(f"Repository indexing completed: {repo_url}")
+            logger.info(f"Repository indexing completed: {repo_url} (UID: {repo_uid})")
             
             return {
                 "repo_url": repo_url,
+                "repo_uid": repo_uid,
                 "total_files": len(files_to_process),
                 "processed": results["processed"],
                 "failed": results["failed"],
@@ -118,13 +122,14 @@ class RepositoryIndexer:
             
         except Exception as e:
             logger.error(f"Error indexing repository {repo_url}: {e}")
-            # Update repository status to failed
-            repo_ref = self.repositories.document(repo_url)
-            repo_ref.update({
-                "status": "failed",
-                "lastUpdated": datetime.utcnow().isoformat() + 'Z',
-                "errorMessage": str(e)
-            })
+            # Update repository status to failed if we have a UID
+            if 'repo_uid' in locals():
+                repo_ref = self.repositories.document(repo_uid)
+                repo_ref.update({
+                    "status": "failed",
+                    "lastUpdated": datetime.utcnow().isoformat() + 'Z',
+                    "errorMessage": str(e)
+                })
             raise
     
     def _get_repository_files(self, repo_path: str) -> List[str]:
@@ -172,7 +177,7 @@ class RepositoryIndexer:
         Process multiple files in a repository.
         
         Args:
-            repo_url: Repository identifier
+            repo_url: Repository URL
             repo_path: Path to repository root
             file_paths: List of file paths to process
             commit_sha: Commit SHA

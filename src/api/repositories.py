@@ -110,7 +110,7 @@ async def index_repository(
             branch=request.branch
         )
         
-        indexed_at = datetime.now(datetime.timezone.utc).isoformat()
+        indexed_at = datetime.utcnow().isoformat() + "Z"
         
         logger.info(f"Repository indexing completed for {request.repo_url}")
         

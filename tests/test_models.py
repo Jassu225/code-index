@@ -169,7 +169,7 @@ class TestFileIndex:
             FileIndex(
                 repoId="example-repo",
                 filePath="src/test.ts",
-                fileHash="invalid",  # Too short
+                fileHash="abc",  # Too short (less than 7 characters)
                 lastCommitSHA="commit123",
                 lastCommitTimestamp="2025-01-26T00:00:00Z",
                 exports=[],

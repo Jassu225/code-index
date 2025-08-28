@@ -21,7 +21,7 @@ async def debug_database():
     
     # Set environment variables
     os.environ["FIRESTORE_EMULATOR_HOST"] = "localhost:8080"
-    os.environ["GCP_PROJECT_ID"] = "code-index-dev"
+    os.environ["GCP_PROJECT_ID"] = "icode-94891"
     os.environ["FIRESTORE_COLLECTION_PREFIX"] = ""
     os.environ["FIRESTORE_DATABASE_ID"] = "(default)"
     

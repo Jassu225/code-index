@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional, List
 
 import git
+import httpx
 
 # Add src to path for imports
 import sys
@@ -27,7 +28,7 @@ class LiveRepositoryIndexer:
     
     def __init__(self):
         self.emulator_port = 8080  # Use existing Firebase emulator port
-        self.project_id = "code-index-dev"  # Use default Firebase emulator project
+        self.project_id = "icode-94891"  # Use default Firebase emulator project
         self.temp_dir: Optional[Path] = None
         self.repo_path: Optional[Path] = None
         
@@ -143,29 +144,46 @@ class LiveRepositoryIndexer:
         repository_files = self.get_repository_files()
         print(f"📁 Found {len(repository_files)} files to process")
         
-        # Repository URL for metadata
-        repo_url = f"https://github.com/test/{repo_id}"
+        # Index repository using the API endpoint
+        print(f"🔧 Indexing repository using API endpoint...")
         
-        # Initialize RepositoryIndexer for first-time indexing
-        from google.cloud import firestore
-        from src.core.repository_indexer import RepositoryIndexer
+        # Import the API client
+        import httpx
+        import json
         
-        firestore_client = firestore.Client(
-            project="code-index-dev",
-            database="(default)"
-        )
-        repo_indexer = RepositoryIndexer(firestore_client)
+        # Prepare the request
+        index_request = {
+            "repo_url": repo_url,
+            "branch": "main"
+        }
         
-        # Index repository using RepositoryIndexer
-        print(f"🔧 Indexing repository with RepositoryIndexer...")
-        results = await repo_indexer.index_repository(
-            repo_url=repo_url,
-            branch="main"
-        )
+        # Call the repository indexing endpoint
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "http://localhost:8000/repositories/index",
+                json=index_request,
+                timeout=300.0  # 5 minutes timeout for indexing
+            )
+            
+            if response.status_code == 200:
+                results = response.json()
+                print(f"✅ Repository indexing API call successful")
+                # Store results for later display
+                self.repo_id = repo_id
+                self.processed_files = results["processed_files"]
+                self.total_files = results["total_files"]
+            else:
+                print(f"❌ Repository indexing API call failed: {response.status_code}")
+                print(f"Response: {response.text}")
+                # Set default values for failed case
+                self.repo_id = repo_id
+                self.processed_files = 0
+                self.total_files = 0
+                return
         
-        processed_files = results["processed"]
-        failed_files = results["failed"]
-        skipped_files = results["skipped"]
+        processed_files = results["processed_files"]
+        failed_files = results["failed_files"]
+        skipped_files = results["skipped_files"]
         
         # Update repository status
         await db.update_repository(repo_id, {

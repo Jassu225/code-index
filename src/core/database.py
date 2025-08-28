@@ -24,6 +24,7 @@ class FirestoreDatabase:
     def __init__(self):
         """Initialize Firestore client."""
         self.settings = get_settings()
+        print(f"Initializing Firestore client with database ID: {self.settings.firestore_database_id}")
         self.client: Optional[firestore.Client] = None
         self._initialize_client()
     

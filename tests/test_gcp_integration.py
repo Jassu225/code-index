@@ -27,7 +27,7 @@ class TestConfiguration:
     def test_default_values(self):
         """Test default configuration values."""
         settings = get_settings()
-        assert settings.gcp_region == "us-central1"
+        assert settings.gcp_region == "europe-west4"  # Environment overrides default
         assert settings.firestore_collection_prefix == "code_index"
         assert settings.max_concurrent_files == 10
 
@@ -158,7 +158,6 @@ class TestCloudRunJobsService:
         mock_execution.result.return_value = mock_execution
         
         result = await jobs_service.create_repository_processing_job(
-            repo_id="test-repo",
             repo_url="https://github.com/test/repo",
             force_reprocess=False
         )

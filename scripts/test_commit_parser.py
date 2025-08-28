@@ -19,7 +19,7 @@ async def test_commit_parser():
     
     # Set up environment
     os.environ["FIRESTORE_EMULATOR_HOST"] = "localhost:8080"
-    os.environ["GCP_PROJECT_ID"] = "code-index-dev"
+    os.environ["GCP_PROJECT_ID"] = "icode-94891"
     os.environ["FIRESTORE_DATABASE_ID"] = "(default)"
     
     print("📋 Setting up environment...")
@@ -28,7 +28,7 @@ async def test_commit_parser():
     try:
         # Initialize Firestore client
         firestore_client = firestore.Client(
-            project="code-index-dev",
+            project="icode-94891",
             database="(default)"
         )
         

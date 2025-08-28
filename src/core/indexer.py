@@ -250,14 +250,19 @@ class FileIndexer:
     ):
         """Update repository metadata after processing a file."""
         try:
-            repo_ref = self.repositories.document(repo_url)
+            # Query for repository by URL to get its UID
+            query = self.repositories.where('url', '==', repo_url).limit(1)
+            docs = query.stream()
             
-            # Get current repository data
-            repo_doc = repo_ref.get()
+            repo_uid = None
+            for doc in docs:
+                repo_uid = doc.id
+                break
             
-            if repo_doc.exists:
-                # Update existing repository
-                current_data = repo_doc.to_dict()
+            if repo_uid:
+                # Update existing repository using UID
+                repo_ref = self.repositories.document(repo_uid)
+                current_data = repo_ref.get().to_dict()
                 processed_files = current_data.get('processedFiles', 0) + 1
                 
                 repo_ref.update({
@@ -266,21 +271,9 @@ class FileIndexer:
                     'processedFiles': processed_files,
                     'lastUpdated': datetime.utcnow().isoformat() + 'Z'
                 })
+                logger.debug(f"Updated repository metadata for {repo_url} (UID: {repo_uid})")
             else:
-                # Create new repository
-                repo_ref.set({
-                    'repoId': repo_url,
-                    'name': repo_url,  # Default name, can be updated later
-                    'url': repo_url,  # Set URL to the repo_url
-                    'lastProcessedCommit': commit_sha,
-                    'lastProcessedCommitTimestamp': commit_timestamp,
-                    'totalFiles': 0,  # Will be updated when scanning repository
-                    'processedFiles': 1,
-                    'lastUpdated': datetime.utcnow().isoformat() + 'Z',
-                    'status': 'processing'
-                })
-            
-            logger.debug(f"Updated repository metadata for {repo_url}")
+                logger.warning(f"Repository not found for URL: {repo_url}, skipping metadata update")
             
         except Exception as e:
             logger.error(f"Error updating repository metadata for {repo_url}: {e}")

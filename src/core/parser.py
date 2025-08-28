@@ -125,15 +125,20 @@ class TypeScriptParser(LanguageParser):
             
             # Check export type
             if self._has_child_type(export_node, 'function_declaration'):
+                print("function declaration")
                 return self._parse_function_export(export_node, content, line_number)
             elif self._has_child_type(export_node, 'class_declaration'):
+                print("class declaration")
                 return self._parse_class_export(export_node, content, line_number)
             elif self._has_child_type(export_node, 'interface_declaration'):
+                print("interface declaration")
                 return self._parse_interface_export(export_node, content, line_number)
             elif self._has_child_type(export_node, 'variable_declaration'):
+                print("variable declaration")
                 return self._parse_variable_export(export_node, content, line_number)
             else:
                 # Generic export
+                print("generic export")
                 return ExportInfo(
                     name=self._extract_export_name(export_node),
                     type="variable",
@@ -185,6 +190,62 @@ class TypeScriptParser(LanguageParser):
             isAsync=is_async,
             isGenerator=is_generator,
             overloads=[]
+        )
+    
+    def _parse_class_export(self, export_node: Node, content: str, line_number: int) -> ExportInfo:
+        """Parse a class export."""
+        class_node = self._find_child_by_type(export_node, 'class_declaration')
+        if not class_node:
+            return None
+        
+        # Extract class name
+        name = self._extract_class_name(class_node)
+        
+        # Parse class information
+        class_info = self._parse_typescript_class_info(class_node, content)
+        
+        return ExportInfo(
+            name=name,
+            type="class",
+            visibility="public",
+            lineNumber=line_number,
+            classInfo=class_info
+        )
+    
+    def _parse_interface_export(self, export_node: Node, content: str, line_number: int) -> ExportInfo:
+        """Parse an interface export."""
+        interface_node = self._find_child_by_type(export_node, 'interface_declaration')
+        if not interface_node:
+            return None
+        
+        # Extract interface name
+        name = self._extract_interface_name(interface_node)
+        
+        # Parse interface information
+        interface_info = self._parse_typescript_interface_info(interface_node, content)
+        
+        return ExportInfo(
+            name=name,
+            type="interface",
+            visibility="public",
+            lineNumber=line_number,
+            interfaceInfo=interface_info
+        )
+    
+    def _parse_variable_export(self, export_node: Node, content: str, line_number: int) -> ExportInfo:
+        """Parse a variable export."""
+        var_node = self._find_child_by_type(export_node, 'variable_declaration')
+        if not var_node:
+            return None
+        
+        # Extract variable name
+        name = self._extract_variable_name(var_node)
+        
+        return ExportInfo(
+            name=name,
+            type="variable",
+            visibility="public",
+            lineNumber=line_number
         )
     
     def _extract_function_parameters(self, func_node: Node, content: str) -> List[Parameter]:
@@ -288,6 +349,30 @@ class TypeScriptParser(LanguageParser):
             return name_node.text.decode('utf8')
         return "anonymous_function"
     
+    def _extract_class_name(self, class_node: Node) -> str:
+        """Extract class name from class declaration."""
+        name_node = self._find_child_by_type(class_node, 'identifier')
+        if name_node:
+            return name_node.text.decode('utf8')
+        return "anonymous_class"
+    
+    def _extract_interface_name(self, interface_node: Node) -> str:
+        """Extract interface name from interface declaration."""
+        name_node = self._find_child_by_type(interface_node, 'identifier')
+        if name_node:
+            return name_node.text.decode('utf8')
+        return "anonymous_interface"
+    
+    def _extract_variable_name(self, var_node: Node) -> str:
+        """Extract variable name from variable declaration."""
+        # Look for variable declarator
+        declarator = self._find_child_by_type(var_node, 'variable_declarator')
+        if declarator:
+            name_node = self._find_child_by_type(declarator, 'identifier')
+            if name_node:
+                return name_node.text.decode('utf8')
+        return "anonymous_variable"
+    
     def _extract_parameter_type(self, param_node: Node, content: str) -> Optional[str]:
         """Extract parameter type annotation."""
         type_node = self._find_child_by_type(param_node, 'type_annotation')
@@ -318,6 +403,229 @@ class TypeScriptParser(LanguageParser):
             if child.type == '*' and child.text == b'*':
                 return True
         return False
+    
+    def _parse_typescript_class_info(self, class_node: Node, content: str) -> ClassInfo:
+        """Parse TypeScript class information."""
+        try:
+            # Extract extends clause
+            extends_clause = self._find_child_by_type(class_node, 'extends_clause')
+            extends_class = None
+            if extends_clause:
+                extends_class = self._extract_node_text(extends_clause, content)
+            
+            # Extract implements clause
+            implements_clause = self._find_child_by_type(class_node, 'implements_clause')
+            implements_interfaces = []
+            if implements_clause:
+                # Extract interface names from implements clause
+                interface_list = self._find_child_by_type(implements_clause, 'interface_list')
+                if interface_list:
+                    for child in interface_list.children:
+                        if child.type == 'type_identifier':
+                            implements_interfaces.append(child.text.decode('utf8'))
+            
+            # Extract methods, properties, and constructors
+            methods = []
+            properties = []
+            constructors = []
+            
+            # Parse class body
+            class_body = self._find_child_by_type(class_node, 'class_body')
+            if class_body:
+                for child in class_body.children:
+                    if child.type == 'method_definition':
+                        method_info = self._parse_class_method(child, content)
+                        if method_info:
+                            methods.append(method_info)
+                    elif child.type == 'field_definition':
+                        property_info = self._parse_class_property(child, content)
+                        if property_info:
+                            properties.append(property_info)
+                    elif child.type == 'constructor':
+                        constructor_info = self._parse_constructor(child, content)
+                        if constructor_info:
+                            constructors.append(constructor_info)
+            
+            return ClassInfo(
+                extends=extends_class,
+                implements=implements_interfaces,
+                methods=methods,
+                properties=properties,
+                constructors=constructors
+            )
+            
+        except Exception as e:
+            logger.warning(f"Error parsing class info: {e}")
+            return ClassInfo(
+                extends=None,
+                implements=[],
+                methods=[],
+                properties=[],
+                constructors=[]
+            )
+    
+    def _parse_typescript_interface_info(self, interface_node: Node, content: str) -> InterfaceInfo:
+        """Parse TypeScript interface information."""
+        try:
+            # Extract extends clause
+            extends_clause = self._find_child_by_type(interface_node, 'extends_clause')
+            extends_interfaces = []
+            if extends_clause:
+                # Extract interface names from extends clause
+                interface_list = self._find_child_by_type(extends_clause, 'interface_list')
+                if interface_list:
+                    for child in interface_list.children:
+                        if child.type == 'type_identifier':
+                            extends_interfaces.append(child.text.decode('utf8'))
+            
+            # Extract methods and properties
+            methods = []
+            properties = []
+            
+            # Parse interface body
+            interface_body = self._find_child_by_type(interface_node, 'object_type')
+            if interface_body:
+                for child in interface_body.children:
+                    if child.type == 'method_signature':
+                        method_info = self._parse_interface_method(child, content)
+                        if method_info:
+                            methods.append(method_info)
+                    elif child.type == 'property_signature':
+                        property_info = self._parse_interface_property(child, content)
+                        if property_info:
+                            properties.append(property_info)
+            
+            return InterfaceInfo(
+                extends=extends_interfaces,
+                methods=methods,
+                properties=properties,
+                indexSignatures=[],
+                callSignatures=[]
+            )
+            
+        except Exception as e:
+            logger.warning(f"Error parsing interface info: {e}")
+            return InterfaceInfo(
+                extends=[],
+                methods=[],
+                properties=[],
+                indexSignatures=[],
+                callSignatures=[]
+            )
+    
+    def _parse_class_method(self, method_node: Node, content: str) -> ExportInfo:
+        """Parse a class method."""
+        try:
+            # Extract method name
+            name_node = self._find_child_by_type(method_node, 'property_identifier')
+            if not name_node:
+                return None
+            
+            name = name_node.text.decode('utf8')
+            line_number = method_node.start_point[0] + 1
+            
+            # Parse function signature if it's a method
+            function_signature = None
+            if self._has_child_type(method_node, 'formal_parameters'):
+                function_signature = self._parse_function_signature(method_node, content)
+            
+            return ExportInfo(
+                name=name,
+                type="function",
+                visibility="public",  # Default to public for class methods
+                lineNumber=line_number,
+                functionSignature=function_signature
+            )
+        except Exception as e:
+            logger.warning(f"Error parsing class method: {e}")
+            return None
+    
+    def _parse_class_property(self, property_node: Node, content: str) -> ExportInfo:
+        """Parse a class property."""
+        try:
+            # Extract property name
+            name_node = self._find_child_by_type(property_node, 'property_identifier')
+            if not name_node:
+                return None
+            
+            name = name_node.text.decode('utf8')
+            line_number = property_node.start_point[0] + 1
+            
+            return ExportInfo(
+                name=name,
+                type="variable",
+                visibility="public",  # Default to public for class properties
+                lineNumber=line_number
+            )
+        except Exception as e:
+            logger.warning(f"Error parsing class property: {e}")
+            return None
+    
+    def _parse_constructor(self, constructor_node: Node, content: str) -> ExportInfo:
+        """Parse a constructor method."""
+        try:
+            name = "constructor"
+            line_number = constructor_node.start_point[0] + 1
+            
+            # Parse function signature
+            function_signature = self._parse_function_signature(constructor_node, content)
+            
+            return ExportInfo(
+                name=name,
+                type="function",
+                visibility="public",
+                lineNumber=line_number,
+                functionSignature=function_signature
+            )
+        except Exception as e:
+            logger.warning(f"Error parsing constructor: {e}")
+            return None
+    
+    def _parse_interface_method(self, method_node: Node, content: str) -> ExportInfo:
+        """Parse an interface method signature."""
+        try:
+            # Extract method name
+            name_node = self._find_child_by_type(method_node, 'property_identifier')
+            if not name_node:
+                return None
+            
+            name = name_node.text.decode('utf8')
+            line_number = method_node.start_point[0] + 1
+            
+            # Parse function signature
+            function_signature = self._parse_function_signature(method_node, content)
+            
+            return ExportInfo(
+                name=name,
+                type="function",
+                visibility="public",
+                lineNumber=line_number,
+                functionSignature=function_signature
+            )
+        except Exception as e:
+            logger.warning(f"Error parsing interface method: {e}")
+            return None
+    
+    def _parse_interface_property(self, property_node: Node, content: str) -> ExportInfo:
+        """Parse an interface property signature."""
+        try:
+            # Extract property name
+            name_node = self._find_child_by_type(property_node, 'property_identifier')
+            if not name_node:
+                return None
+            
+            name = name_node.text.decode('utf8')
+            line_number = property_node.start_point[0] + 1
+            
+            return ExportInfo(
+                name=name,
+                type="variable",
+                visibility="public",
+                lineNumber=line_number
+            )
+        except Exception as e:
+            logger.warning(f"Error parsing interface property: {e}")
+            return None
     
     def _extract_import_source(self, import_node: Node, content: str) -> str:
         """Extract import source path."""
@@ -858,6 +1166,7 @@ class CodeParser:
             return result
         
         try:
+            print(f"Parsing {file_path} with {language} parser")
             return parser.parse(content)
         except Exception as e:
             result = ParseResult()
