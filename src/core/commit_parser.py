@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Set
 import git
 
+from src.core.database import FirestoreDatabase
+
 from .indexer import FileIndexer
 from ..models.repository import RepositoryMetadata
 
@@ -27,14 +29,10 @@ class CommitParser:
     4. Updating repository metadata
     """
     
-    def __init__(self, firestore_client):
+    def __init__(self, db: FirestoreDatabase):
         """Initialize commit parser."""
-        self.firestore_client = firestore_client
-        self.file_indexer = FileIndexer(firestore_client)
-        
-        # Collections
-        self.repositories = firestore_client.collection('repositories')
-        self.file_indexes = firestore_client.collection('file_indexes')
+        self.db = db
+        self.file_indexer = FileIndexer(db)
     
     async def process_commit(
         self,
@@ -290,7 +288,7 @@ class CommitParser:
     async def _get_repository_metadata(self, repo_url: str) -> Optional[RepositoryMetadata]:
         """Get repository metadata from Firestore."""
         try:
-            repo_ref = self.repositories.document(repo_url)
+            repo_ref = self.db.repositories.document(repo_url)
             doc = repo_ref.get()
             
             if doc.exists:
@@ -310,7 +308,7 @@ class CommitParser:
     ):
         """Update repository metadata after processing commit."""
         try:
-            repo_ref = self.repositories.document(repo_url)
+            repo_ref = self.db.repositories.document(repo_url)
             
             # Get current repository data
             repo_doc = repo_ref.get()

@@ -3,23 +3,43 @@ Main FastAPI application entry point for the Serverless Code Index System.
 """
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 from datetime import datetime
+from pathlib import Path
+
+# Add src to path for direct execution
+if __name__ == "__main__":
+    src_path = Path(__file__).parent
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from .api.health import router as health_router
-from .api.files import router as files_router
-from .api.repositories import router as repositories_router
-from .core.locks import FileLock
-from .core.indexer import FileIndexer
-from .core.config import get_settings
-from .core.database import get_database
-from .core.cloud_run_jobs import get_jobs_service
+# Use absolute imports for direct execution, relative for module import
+try:
+    from .api.health import router as health_router
+    from .api.files import router as files_router
+    from .api.repositories import router as repositories_router
+    from .core.locks import FileLock
+    from .core.indexer import FileIndexer
+    from .core.config import get_settings
+    from .core.database import get_database
+    from .core.cloud_run_jobs import get_jobs_service
+except ImportError:
+    # Fallback to absolute imports for direct execution
+    from api.health import router as health_router
+    from api.files import router as files_router
+    from api.repositories import router as repositories_router
+    from core.locks import FileLock
+    from core.indexer import FileIndexer
+    from core.config import get_settings
+    from core.database import get_database
+    from core.cloud_run_jobs import get_jobs_service
 
 # Configure logging
 logging.basicConfig(
@@ -62,7 +82,7 @@ async def lifespan(app: FastAPI):
         except Exception as jobs_error:
             logger.warning(f"Cloud Run Jobs initialization failed (continuing anyway): {jobs_error}")
         
-        logger.info("Application startup completed (some services may be unavailable)")
+        logger.info("Application startup completed")
         
     except Exception as e:
         logger.error(f"Critical error during startup: {e}")
@@ -104,13 +124,20 @@ app.include_router(repositories_router, prefix="/repositories", tags=["repositor
 @app.get("/", tags=["root"])
 async def root() -> Dict[str, Any]:
     """Root endpoint with system information."""
+    # Debug breakpoint - the debugger will stop here
+    debug_info = "Debugger test - this line will be hit when debugging"
+    
+    # Uncomment the next line to test with pdb
+    # import pdb; pdb.set_trace()
+    
     return {
         "name": "Serverless Code Index System",
         "version": "0.1.0",
         "description": "A serverless backend that tracks exported/imported variables across files in git repositories",
         "docs": "/docs",
         "health": "/health",
-        "status": "operational"
+        "status": "operational",
+        "debug": debug_info
     }
 
 
@@ -173,7 +200,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "src.main:app",
         host="0.0.0.0",
-        port=8080,
+        port=8000,
         reload=True,
         log_level="info"
     )

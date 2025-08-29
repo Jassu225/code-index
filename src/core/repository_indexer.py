@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 
+from src.core.database import FirestoreDatabase
+
 from .indexer import FileIndexer
 from .parser import CodeParser
 from ..models.repository import RepositoryMetadata
@@ -29,15 +31,11 @@ class RepositoryIndexer:
     4. Storing repository metadata
     """
     
-    def __init__(self, firestore_client):
+    def __init__(self, db: FirestoreDatabase):
         """Initialize repository indexer."""
-        self.firestore_client = firestore_client
-        self.file_indexer = FileIndexer(firestore_client)
+        self.db = db
+        self.file_indexer = FileIndexer(db)
         self.parser = CodeParser()
-        
-        # Collections
-        self.repositories = firestore_client.collection('repositories')
-        self.file_indexes = firestore_client.collection('file_indexes')
     
     async def index_repository(
         self,
@@ -81,7 +79,7 @@ class RepositoryIndexer:
             )
             
             # Store repository metadata with auto-generated UID
-            doc_ref = self.repositories.add(repo_metadata.model_dump())
+            doc_ref = self.db.repositories.add(repo_metadata.model_dump())
             repo_uid = doc_ref[1].id  # Get the auto-generated UID
             logger.info(f"Created repository metadata with UID: {repo_uid}")
             
@@ -107,7 +105,7 @@ class RepositoryIndexer:
             }
             
             # Get the document reference using the UID
-            repo_ref = self.repositories.document(repo_uid)
+            repo_ref = self.db.repositories.document(repo_uid)
             repo_ref.update(final_status)
             logger.info(f"Repository indexing completed: {repo_url} (UID: {repo_uid})")
             
@@ -124,7 +122,7 @@ class RepositoryIndexer:
             logger.error(f"Error indexing repository {repo_url}: {e}")
             # Update repository status to failed if we have a UID
             if 'repo_uid' in locals():
-                repo_ref = self.repositories.document(repo_uid)
+                repo_ref = self.db.repositories.document(repo_uid)
                 repo_ref.update({
                     "status": "failed",
                     "lastUpdated": datetime.utcnow().isoformat() + 'Z',

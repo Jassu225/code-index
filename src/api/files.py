@@ -59,16 +59,7 @@ async def process_file(
     """
     try:
         # Initialize FileIndexer with the database client
-        from google.cloud import firestore
-        from src.core.indexer import FileIndexer
-        
-        # Get Firestore client from the database
-        firestore_client = firestore.Client(
-            project=db.settings.gcp_project_id,
-            database=db.settings.firestore_database_id or "(default)"
-        )
-        
-        indexer = FileIndexer(firestore_client)
+        indexer = FileIndexer(db)
         
         # Process the file using FileIndexer
         # The FileIndexer will automatically parse the file_content to extract exports and imports

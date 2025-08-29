@@ -90,17 +90,10 @@ async def index_repository(
     4. Store file indexes and repository metadata
     """
     try:
-        from google.cloud import firestore
         from src.core.repository_indexer import RepositoryIndexer
         
-        # Initialize Firestore client with database settings
-        firestore_client = firestore.Client(
-            project=db.settings.gcp_project_id,
-            database=db.settings.firestore_database_id or "(default)"
-        )
-        
         # Initialize RepositoryIndexer
-        repo_indexer = RepositoryIndexer(firestore_client)
+        repo_indexer = RepositoryIndexer(db)
         
         logger.info(f"Starting repository indexing for {request.repo_url}")
         

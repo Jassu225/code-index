@@ -4,25 +4,41 @@ Python parser using Tree-sitter.
 
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Final, List, Optional
 from tree_sitter import Node
 
-from ...models.file_index import ExportInfo, ImportInfo, FunctionSignature, Parameter, ClassInfo
+from src.models.file_index import ExportInfo, ImportInfo, FunctionSignature, Parameter, ClassInfo
 from .base import LanguageParser, ParseResult
 
 logger = logging.getLogger(__name__)
 
+PYTHON_EXPORT_QUERIES: Final[str] = """
+(function_definition 
+  name: (identifier) @export.function.name)
+
+(class_definition 
+  name: (identifier) @export.class.name
+  body: (block 
+    (function_definition 
+      name: (identifier) @export.class.method.name)))
+
+(assignment 
+  left: (identifier) @export.variable.name)
+"""
 
 class PythonParser(LanguageParser):
     """Python parser using Tree-sitter."""
+
+    EXTENSIONS: Final[List[str]] = ['.py', '.pyi']
+    LANGUAGE_NAME: Final[str] = 'python'
     
     def __init__(self):
-        super().__init__("python")
+        super().__init__()
     
     def detect_language(self, file_path: str) -> bool:
         """Check if file is Python."""
         ext = Path(file_path).suffix.lower()
-        return ext in ['.py', '.pyi']
+        return ext in PythonParser.EXTENSIONS
     
     def parse(self, content: str) -> ParseResult:
         """Parse Python content."""
@@ -30,7 +46,7 @@ class PythonParser(LanguageParser):
             raise RuntimeError("Language not set for Python parser")
         
         result = ParseResult()
-        result.language = self.language_name
+        result.language = PythonParser.LANGUAGE_NAME
         
         try:
             # Try Tree-sitter parsing first

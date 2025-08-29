@@ -40,7 +40,7 @@ class RepositoryProcessor:
         """Initialize the repository processor."""
         self.settings = get_settings()
         self.db = FirestoreDatabase()
-        self.indexer = FileIndexer()
+        self.indexer = FileIndexer(self.db)
         self.parser = CodeParser()
         self.lock_manager = DistributedLockManager()
         

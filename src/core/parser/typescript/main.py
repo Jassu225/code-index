@@ -4,219 +4,52 @@ TypeScript/JavaScript parser using Tree-sitter.
 
 import logging
 from pathlib import Path
-from typing import List, Optional
-from tree_sitter import Node
+from typing import Final, List, Optional
+from tree_sitter import Language, Node, Parser
+import tree_sitter_typescript as ts_typescript
 
-from ...models.file_index import ExportInfo, ImportInfo, FunctionSignature, Parameter, ClassInfo, InterfaceInfo
-from .base import LanguageParser, ParseResult
+from src.models.file_index import ExportInfo, ImportInfo, FunctionSignature, Parameter, ClassInfo, InterfaceInfo
+from ..base import LanguageParser, ParseResult
+from .class_parser import TypescriptClassParser
+from .fallback import TypescriptFallbackParser
 
 logger = logging.getLogger(__name__)
 
 
-class TypescriptClassParser:
-    """Dedicated parser for TypeScript class information."""
-    
-    def __init__(self):
-        pass
-    
-    def parse_class_info(self, class_name: str, content: str, line_num: int) -> ClassInfo:
-        """Parse TypeScript class information from content."""
-        import re
-        
-        # Find the class definition block - handle generic types like TsArray<T>
-        class_start_pattern = rf'export\s+class\s+{re.escape(class_name)}(?:\s*<[^>]*>)?\s*{{'
-        class_start_match = re.search(class_start_pattern, content)
-        
-        if not class_start_match:
-            return ClassInfo(
-                extends=None,
-                implements=[],
-                methods=[],
-                properties=[],
-                constructors=[]
-            )
-        
-        # Find the matching closing brace by counting braces
-        start_pos = class_start_match.end() - 1  # Position of the opening brace
-        brace_count = 0
-        end_pos = start_pos
-        
-        for i, char in enumerate(content[start_pos:], start_pos):
-            if char == '{':
-                brace_count += 1
-            elif char == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    end_pos = i
-                    break
-        
-        if brace_count != 0:
-            return ClassInfo(
-                extends=None,
-                implements=[],
-                methods=[],
-                properties=[],
-                constructors=[]
-            )
-        
-        class_body = content[start_pos + 1:end_pos]
-        
-        # Extract methods (public methods) - comprehensive pattern
-        # Handle methods with and without return types, with and without parameters
-        method_pattern = r'(?:public\s+|private\s+)?(?:get\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*[^{]+)?\s*{'
-        methods = []
-        seen_methods = set()
-        
-        for match in re.finditer(method_pattern, class_body):
-            method_name = match.group(1)
-            if (method_name != class_name and 
-                method_name != 'constructor' and 
-                method_name not in seen_methods):  # Skip duplicates
-                seen_methods.add(method_name)
-                # Calculate actual line number within class body
-                method_line = line_num + class_body[:match.start()].count('\n') + 1
-                methods.append(ExportInfo(
-                    name=method_name,
-                    type="function",
-                    visibility="public",
-                    lineNumber=method_line
-                ))
-        
-        # Extract properties (avoid duplicates and parameter confusion)
-        # Look for class properties with more specific patterns
-        property_patterns = [
-            r'(?:public\s+|private\s+)?(\w+)\s*:\s*\w+(?:\s*=\s*[^;]+)?;',  # Class properties
-            r'(?:public\s+|private\s+)?(\w+)\s*:\s*\w+\[\]',  # Array properties
-        ]
-        properties = []
-        seen_properties = set()
-        
-        for pattern in property_patterns:
-            for match in re.finditer(pattern, class_body):
-                prop_name = match.group(1)
-                # Skip if it's a reserved word, already seen, or looks like a parameter
-                if (prop_name not in ['extends', 'implements'] and 
-                    prop_name not in seen_properties and
-                    prop_name not in ['element', 'index', 'newName'] and  # Skip parameter names
-                    not re.search(rf'\b{re.escape(prop_name)}\s*\(', class_body)):  # Skip if it's a method
-                    seen_properties.add(prop_name)
-                    # Calculate actual line number within class body
-                    prop_line = line_num + class_body[:match.start()].count('\n') + 1
-                    properties.append(ExportInfo(
-                        name=prop_name,
-                        type="variable",
-                        visibility="public",
-                        lineNumber=prop_line
-                    ))
-        
-        # Extract constructor
-        constructor_pattern = rf'constructor\s*\([^)]*\)\s*{{'
-        constructors = []
-        constructor_match = re.search(constructor_pattern, class_body)
-        if constructor_match:
-            # Calculate actual line number within class body
-            constructor_line = line_num + class_body[:constructor_match.start()].count('\n') + 1
-            constructors.append(ExportInfo(
-                name="constructor",
-                type="function",
-                visibility="public",
-                lineNumber=constructor_line
-            ))
-        
-        return ClassInfo(
-            extends=None,  # Would need more complex parsing for extends
-            implements=[],  # Would need more complex parsing for implements
-            methods=methods,
-            properties=properties,
-            constructors=constructors
-        )
-
-
-class TypescriptFallbackParser:
-    """Parser for TypeScript fallback scenarios when Tree-sitter fails."""
-    
-    def __init__(self):
-        pass
-    
-    def parse_function_signature(self, func_name: str, content: str, line_num: int) -> FunctionSignature:
-        """Parse function signature using regex fallback."""
-        import re
-        
-        # Find the function definition
-        func_pattern = rf'export\s+function\s+{re.escape(func_name)}\s*\(([^)]*)\)\s*(?::\s*(\w+))?'
-        func_match = re.search(func_pattern, content)
-        
-        if not func_match:
-            return FunctionSignature(
-                parameters=[],
-                returnType="any",
-                isAsync=False,
-                isGenerator=False,
-                overloads=[]
-            )
-        
-        # Extract parameters
-        params_text = func_match.group(1)
-        parameters = []
-        if params_text.strip():
-            param_names = [p.strip().split(':')[0].strip() for p in params_text.split(',')]
-            for param_name in param_names:
-                if param_name:
-                    parameters.append(Parameter(
-                        name=param_name,
-                        type="any",
-                        required=True,
-                        defaultValue=None,
-                        description=None
-                    ))
-        
-        # Extract return type
-        return_type = func_match.group(2) if func_match.group(2) else "any"
-        
-        # Check if async
-        is_async = 'async' in content[:func_match.start()]
-        
-        # Check if generator
-        is_generator = '*' in content[:func_match.start()]
-        
-        return FunctionSignature(
-            parameters=parameters,
-            returnType=return_type,
-            isAsync=is_async,
-            isGenerator=is_generator,
-            overloads=[]
-        )
-
-
 class TypeScriptParser(LanguageParser):
     """TypeScript/JavaScript parser using Tree-sitter."""
+
+    EXTENSIONS: Final[List[str]] = ['.ts', '.tsx', '.js', '.jsx']
+    LANGUAGE_NAME: Final[str] = 'typescript'
+    LANGUAGE: Final[Language] = Language(ts_typescript.language_typescript())
     
     def __init__(self):
-        super().__init__("typescript")
+        super().__init__()
+        self.parser = Parser(language=TypeScriptParser.LANGUAGE)
         self.class_parser = TypescriptClassParser()
         self.fallback_parser = TypescriptFallbackParser()
     
     def detect_language(self, file_path: str) -> bool:
-        """Check if file is TypeScript/JavaScript."""
+        """Check if file is TypeScript."""
         ext = Path(file_path).suffix.lower()
-        return ext in ['.ts', '.tsx', '.js', '.jsx']
+        return ext in TypeScriptParser.EXTENSIONS
     
     def parse(self, content: str) -> ParseResult:
-        """Parse TypeScript/JavaScript content."""
-        if not self.language:
-            raise RuntimeError("Language not set for TypeScript parser")
-        
+        """Parse TypeScript content."""
         result = ParseResult()
-        result.language = self.language_name
+        result.language = TypeScriptParser.LANGUAGE_NAME
         
         try:
             # Try Tree-sitter parsing first
-            tree = self.parser.parse(bytes(content, 'utf8'))
+            tree = self.parser.parse(content.encode('utf8'))
             root_node = tree.root_node
+            logger.info("---------------TREEE-----------------")
+            logger.info(tree)
             
             # Extract exports and imports
             result.exports = self._extract_exports(root_node, content)
             result.imports = self._extract_imports(root_node, content)
+            
             
         except Exception as e:
             logger.info(f"Tree-sitter parsing failed, using regex fallback: {e}")
@@ -496,7 +329,7 @@ class TypeScriptParser(LanguageParser):
     
     def _extract_class_name(self, class_node: Node) -> str:
         """Extract class name from class declaration."""
-        name_node = self._find_child_by_type(class_node, 'identifier')
+        name_node = self._find_child_by_type(class_node, 'type_identifier')
         if name_node:
             return name_node.text.decode('utf8')
         return "anonymous_class"
@@ -582,7 +415,7 @@ class TypeScriptParser(LanguageParser):
                         method_info = self._parse_class_method(child, content)
                         if method_info:
                             methods.append(method_info)
-                    elif child.type == 'field_definition':
+                    elif child.type == 'public_field_definition':
                         property_info = self._parse_class_property(child, content)
                         if property_info:
                             properties.append(property_info)
@@ -688,6 +521,14 @@ class TypeScriptParser(LanguageParser):
     def _parse_class_property(self, property_node: Node, content: str) -> ExportInfo:
         """Parse a class property."""
         try:
+            modifier = self._find_child_by_type(property_node, 'accessibility_modifier')
+            visibility = "public"
+            if modifier:
+                visibility = modifier.text.decode('utf8')
+            
+            if visibility != "public":
+                return None
+                
             # Extract property name
             name_node = self._find_child_by_type(property_node, 'property_identifier')
             if not name_node:

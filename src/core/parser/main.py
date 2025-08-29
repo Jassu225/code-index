@@ -62,16 +62,16 @@ class CodeParser:
         """
         ext = Path(file_path).suffix.lower()
         
-        if ext in ['.ts', '.tsx', '.js', '.jsx']:
-            return 'typescript'
-        elif ext in ['.py', '.pyi']:
-            return 'python'
-        elif ext in ['.go']:
-            return 'go'
-        elif ext in ['.java']:
-            return 'java'
-        elif ext in ['.cs']:
-            return 'csharp'
+        if ext in TypeScriptParser.EXTENSIONS:
+            return TypeScriptParser.LANGUAGE_NAME
+        elif ext in PythonParser.EXTENSIONS:
+            return PythonParser.LANGUAGE_NAME
+        # elif ext in ['.go']:
+        #     return 'go'
+        # elif ext in ['.java']:
+        #     return 'java'
+        # elif ext in ['.cs']:
+        #     return 'csharp'
         else:
             return 'unknown'
     

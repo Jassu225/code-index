@@ -4,7 +4,7 @@ FROM python:3.11-slim
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/src
-ENV PORT=8080
+ENV PORT=8000
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \

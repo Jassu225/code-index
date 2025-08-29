@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from google.cloud import firestore
-from google.cloud.firestore import DocumentReference, CollectionReference, WriteBatch
+from google.cloud.firestore import DocumentReference, CollectionReference, FieldFilter, WriteBatch
 from google.cloud.firestore_v1.base_document import DocumentSnapshot
 from google.api_core import exceptions
 
@@ -25,31 +25,20 @@ class FirestoreDatabase:
         """Initialize Firestore client."""
         self.settings = get_settings()
         print(f"Initializing Firestore client with database ID: {self.settings.firestore_database_id}")
-        self.client: Optional[firestore.Client] = None
-        self._initialize_client()
-    
-    def _initialize_client(self):
-        """Initialize Firestore client with proper configuration."""
-        try:
-            if self.settings.service_account_key_path:
-                # Use service account key file
-                self.client = firestore.Client.from_service_account_json(
+        print(f"Initializing Firestore client with collection prefix: {self.settings.firestore_collection_prefix}")
+        self.client = firestore.Client.from_service_account_json(
                     self.settings.service_account_key_path,
                     project=self.settings.gcp_project_id,
                     database=self.settings.firestore_database_id or "(default)"
-                )
-            else:
-                # Use application default credentials
-                self.client = firestore.Client(
+                ) if self.settings.service_account_key_path else firestore.Client(
                     project=self.settings.gcp_project_id,
                     database=self.settings.firestore_database_id or "(default)"
                 )
-            
-            logger.info(f"Firestore client initialized for project: {self.settings.gcp_project_id}, database: {self.settings.firestore_database_id or '(default)'}")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize Firestore client: {e}")
-            raise
+        self.repositories = self._get_collection("repositories")
+        logger.info(f"Repositories collection: {self.repositories._path}")
+        self.file_indexes = self._get_collection("file_indexes")
+        logger.info(f"File indexes collection: {self.file_indexes._path}")
+        logger.info(f"Firestore client initialized for project: {self.settings.gcp_project_id}, database: {self.settings.firestore_database_id or '(default)'}")
     
     def _get_collection(self, collection_name: str) -> CollectionReference:
         """Get a Firestore collection reference."""
@@ -63,6 +52,7 @@ class FirestoreDatabase:
         else:
             collection_path = collection_name
             
+        print(f"----------Database: Getting collection '{collection_name}' with prefix '{prefix}' -> path: '{collection_path}'")
         return self.client.collection(collection_path)
     
     def _get_document_ref(self, collection_name: str, doc_id: str) -> DocumentReference:
@@ -146,7 +136,7 @@ class FirestoreDatabase:
             
             # Delete all file indexes for this repository
             file_indexes_collection = self._get_collection("file_indexes")
-            file_indexes = file_indexes_collection.where("repoId", "==", repo_url).stream()
+            file_indexes = file_indexes_collection.where(filter=FieldFilter("repoId", "==", repo_url)).stream()
             
             for doc in file_indexes:
                 batch.delete(doc.reference)
@@ -196,8 +186,11 @@ class FirestoreDatabase:
     async def list_file_indexes(self, repo_url: str) -> List[FileIndex]:
         """List all file indexes for a specific repository."""
         try:
+            print(f"Listing file indexes for repository: {repo_url}")
             collection = self._get_collection("file_indexes")
-            docs = collection.where("repoId", "==", repo_url).stream()
+            print(f"Collection: {collection._path}")
+            query = collection.where(filter=FieldFilter("repoId", "==", repo_url))
+            docs = query.stream()
             
             file_indexes = []
             for doc in docs:
@@ -273,7 +266,7 @@ class FirestoreDatabase:
             
             # Firestore doesn't support full-text search, so we'll do a basic query
             # In production, consider using Algolia or similar for better search
-            docs = collection.where("repoId", "==", repo_url).limit(limit).stream()
+            docs = collection.where(filter=FieldFilter("repoId", "==", repo_url)).limit(limit).stream()
             
             results = []
             for doc in docs:

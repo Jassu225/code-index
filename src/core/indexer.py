@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Optional, List
 from google.cloud import firestore
 
+from src.core.database import FirestoreDatabase
+
 from ..models.file_index import FileIndex, ExportInfo, ImportInfo
 from ..models.repository import RepositoryMetadata
 from .locks import FileLock
@@ -24,16 +26,14 @@ class FileIndexer:
     Layer 2: File-level timestamp validation
     """
     
-    def __init__(self, firestore_client: firestore.Client):
+    def __init__(self, db: FirestoreDatabase):
         """
         Initialize file indexer.
         
         Args:
-            firestore_client: Firestore client instance
+            db: Firestore database instance
         """
-        self.firestore_client = firestore_client
-        self.file_indexes = firestore_client.collection('file_indexes')
-        self.repositories = firestore_client.collection('repositories')
+        self.db = db
         
         # Initialize CodeParser for extracting exports/imports
         from src.core.parser import CodeParser
@@ -206,7 +206,7 @@ class FileIndexer:
             )
             
             # Store in Firestore with auto-generated document ID
-            doc_ref = self.file_indexes.document()
+            doc_ref = self.db.file_indexes.document()
             doc_ref.set(file_index.model_dump())
             
             # Update repository metadata
@@ -231,7 +231,7 @@ class FileIndexer:
         """
         try:
             # Query by repoId and filePath fields instead of document ID
-            query = self.file_indexes.where('repoId', '==', repo_url).where('filePath', '==', file_path)
+            query = self.db.file_indexes.where(filter=firestore.FieldFilter('repoId', '==', repo_url)).where(filter=firestore.FieldFilter('filePath', '==', file_path))
             docs = query.limit(1).stream()
             
             for doc in docs:
@@ -251,7 +251,7 @@ class FileIndexer:
         """Update repository metadata after processing a file."""
         try:
             # Query for repository by URL to get its UID
-            query = self.repositories.where('url', '==', repo_url).limit(1)
+            query = self.db.repositories.where(filter=firestore.FieldFilter('url', '==', repo_url)).limit(1)
             docs = query.stream()
             
             repo_uid = None
@@ -261,7 +261,7 @@ class FileIndexer:
             
             if repo_uid:
                 # Update existing repository using UID
-                repo_ref = self.repositories.document(repo_uid)
+                repo_ref = self.db.repositories.document(repo_uid)
                 current_data = repo_ref.get().to_dict()
                 processed_files = current_data.get('processedFiles', 0) + 1
                 
@@ -322,7 +322,7 @@ class FileIndexer:
             RepositoryMetadata if found, None otherwise
         """
         try:
-            repo_ref = self.repositories.document(repo_url)
+            repo_ref = self.db.repositories.document(repo_url)
             doc = repo_ref.get()
             
             if doc.exists:
@@ -344,7 +344,7 @@ class FileIndexer:
             List of FileIndex objects
         """
         try:
-            query = self.file_indexes.where('repoId', '==', repo_url)
+            query = self.db.file_indexes.where(filter=firestore.FieldFilter('repoId', '==', repo_url))
             docs = query.stream()
             
             file_indexes = []
@@ -503,7 +503,7 @@ class FileIndexer:
         """
         try:
             # Query by repoId and filePath fields to find the document to delete
-            query = self.file_indexes.where('repoId', '==', repo_url).where('filePath', '==', file_path)
+            query = self.db.file_indexes.where(filter=firestore.FieldFilter('repoId', '==', repo_url)).where(filter=firestore.FieldFilter('filePath', '==', file_path))
             docs = query.limit(1).stream()
             
             for doc in docs:
